@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # node:test against an in-memory KV stub, so this needs no dependencies
+      # and gives fast feedback before the install below.
+      - name: Test
+        run: node --test
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+          run_install: true
+
+      # Catches a broken worker or wrangler.toml here rather than in the
+      # Workers Build that runs after the merge.
+      - name: Check the worker builds
+        run: pnpm exec wrangler deploy --dry-run
