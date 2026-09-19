@@ -1,9 +1,13 @@
-import { CORS_HEADERS, DEDUP_WINDOW_MS, json, isBot, checkAuth, requireAuth, requireAuthCors, servePixel, html } from './shared.js';
+import { CORS_HEADERS, DEDUP_WINDOW_MS, json, isBot, checkAuth, requireAuth, servePixel, html } from './shared.js';
 import { sendWebhookNotifications } from './notifications.js';
 import { renderDetail } from './views/detail.js';
 import { renderDashboard } from './views/dashboard.js';
 
 const SELF_VIEW_WINDOW_MS = 5_000;
+
+// 8 hex chars was 32 bits: a ~50% chance of a silent overwriting collision by
+// ~77k trackers, and cheap to enumerate. 16 hex chars is 64 bits.
+const ID_LENGTH = 16;
 
 export default {
   async fetch(request, env) {
@@ -16,7 +20,7 @@ export default {
     // POST /self — extension signals sender viewed a thread (batch: multiple pixel IDs)
     // Called AFTER opens have been recorded, so we retroactively reclassify.
     if (url.pathname === '/self' && request.method === 'POST') {
-      if (!checkAuth(request, env)) return requireAuthCors();
+      if (!checkAuth(request, env)) return requireAuth(env, CORS_HEADERS);
 
       let ids;
       try {
@@ -152,7 +156,7 @@ export default {
 
     // GET /s/:id — stats for a tracking pixel
     if (url.pathname.startsWith('/s/')) {
-      if (!checkAuth(request, env)) return requireAuth();
+      if (!checkAuth(request, env)) return requireAuth(env);
 
       const id = url.pathname.split('/s/')[1];
       if (!id) return new Response('Missing id', { status: 400 });
@@ -174,9 +178,9 @@ export default {
 
     // GET/POST /new — create a new tracking pixel
     if (url.pathname === '/new') {
-      if (!checkAuth(request, env)) return requireAuthCors();
+      if (!checkAuth(request, env)) return requireAuth(env, CORS_HEADERS);
 
-      const id = crypto.randomUUID().slice(0, 8);
+      const id = crypto.randomUUID().replace(/-/g, '').slice(0, ID_LENGTH);
       const senderIp = request.headers.get('cf-connecting-ip') || 'unknown';
 
       let recipient = null, subject = '', bodyPreview = '', messageId = '';
@@ -214,7 +218,7 @@ export default {
 
     // GET /list — JSON API for extension
     if (url.pathname === '/list') {
-      if (!checkAuth(request, env)) return requireAuthCors();
+      if (!checkAuth(request, env)) return requireAuth(env, CORS_HEADERS);
 
       const list = await env.TRACKER.list();
       const results = [];
@@ -232,7 +236,7 @@ export default {
 
     // GET /d/:id — delete a tracking pixel
     if (url.pathname.startsWith('/d/') && request.method === 'GET') {
-      if (!checkAuth(request, env)) return requireAuth();
+      if (!checkAuth(request, env)) return requireAuth(env);
       const id = url.pathname.split('/d/')[1];
       if (!id) return json({ error: 'Missing id' }, 400);
       await env.TRACKER.delete(id);
@@ -241,7 +245,7 @@ export default {
 
     // GET / — dashboard
     if (url.pathname === '/') {
-      if (!checkAuth(request, env)) return requireAuth();
+      if (!checkAuth(request, env)) return requireAuth(env);
 
       const list = await env.TRACKER.list();
       const results = [];

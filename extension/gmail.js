@@ -476,7 +476,8 @@
       const src = img.src || img.getAttribute('src') || '';
       // Only match if src contains our server host
       if (!src.includes(serverHost)) return;
-      const match = src.match(/\/t\/([a-f0-9]{8})\b/);
+      // 8 chars covers trackers created before IDs were widened to 16.
+      const match = src.match(/\/t\/([a-f0-9]{8,32})\b/);
       if (match) ids.add(match[1]);
     });
 

@@ -43,30 +43,50 @@ export function isBot(userAgent, ip) {
   return false;
 }
 
+// Length is not hidden, only the contents. Good enough for a shared password
+// over the public internet, where network jitter dwarfs the comparison itself.
+function constantTimeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 export function checkAuth(request, env) {
-  if (!env.DASHBOARD_PASSWORD) return true;
+  // Fail closed. An unset password used to open every route to the internet,
+  // exposing recipients, subjects and opener IPs to anyone who found the URL.
+  if (!env.DASHBOARD_PASSWORD) return false;
+
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Basic ')) return false;
-  const base64 = authHeader.slice(6);
-  const decoded = atob(base64);
-  const [, password] = decoded.split(':');
-  return password === env.DASHBOARD_PASSWORD;
+
+  let decoded;
+  try {
+    decoded = atob(authHeader.slice(6));
+  } catch {
+    return false; // malformed base64 is a failed login, not a 500
+  }
+
+  // Only the first colon separates user from password; splitting on every colon
+  // truncated any password that contained one, locking the owner out for good.
+  const sep = decoded.indexOf(':');
+  if (sep === -1) return false;
+
+  return constantTimeEqual(decoded.slice(sep + 1), env.DASHBOARD_PASSWORD);
 }
 
-export function requireAuth() {
+export function requireAuth(env, extraHeaders = {}) {
+  if (!env.DASHBOARD_PASSWORD) {
+    return new Response(
+      'Mail Tracker is not configured.\n\n' +
+      'DASHBOARD_PASSWORD is unset, so every route is refused rather than left open.\n' +
+      'Set it with:  npx wrangler secret put DASHBOARD_PASSWORD\n',
+      { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8', ...extraHeaders } },
+    );
+  }
   return new Response('Unauthorized', {
     status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="Mail Tracker"' },
-  });
-}
-
-export function requireAuthCors() {
-  return new Response('Unauthorized', {
-    status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="Mail Tracker"',
-      ...CORS_HEADERS,
-    },
+    headers: { 'WWW-Authenticate': 'Basic realm="Mail Tracker"', ...extraHeaders },
   });
 }
 
