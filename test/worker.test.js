@@ -87,8 +87,10 @@ describe('escaping', () => {
     assert.ok(!jsonForScript('a b').includes(' '));
   });
 
-  test('esc covers the four HTML entities', () => {
+  test('esc covers every HTML entity that can break out of markup', () => {
     assert.equal(esc('<a href="x">&</a>'), '&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;');
+    // Guards a single-quoted attribute, should one ever be introduced.
+    assert.equal(esc("x' onerror='alert(1)"), 'x&#39; onerror=&#39;alert(1)');
   });
 
   test('a hostile User-Agent cannot break out of the detail page', () => {

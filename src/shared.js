@@ -166,6 +166,14 @@ export function html(content, nonce) {
   });
 }
 
+// Single quotes are escaped too. No template uses single-quoted attributes
+// today, so this is not a live hole — it removes the chance that adding one
+// later turns esc() into an injection point without anyone noticing.
 export function esc(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
