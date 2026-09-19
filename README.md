@@ -248,9 +248,10 @@ Published mail-tracker (1.2s)
 
 **Save this URL** — you'll enter it in the extension settings.
 
-#### Step 7 — Set Dashboard Password (Highly Recommended)
+#### Step 7 — Set Dashboard Password (Required)
 
-Protect your tracking data with a password:
+The worker refuses every route until this is set, rather than leaving your
+recipients, subjects and opener IPs readable by anyone who finds the URL:
 
 ```bash
 pnpm exec wrangler secret put DASHBOARD_PASSWORD
@@ -264,6 +265,9 @@ When prompted, enter a secure password. This password will be required to:
 **Note:** Secrets are stored encrypted in Cloudflare, not in `.env` or `wrangler.toml`. The `.env.example` file is just a template for reference.
 
 **Important:** The tracking pixel endpoint (`/t/:id`) remains open so emails can load properly.
+
+A password containing `:` is fine. If `DASHBOARD_PASSWORD` is missing the worker
+answers `503` with a reminder instead of serving the dashboard.
 
 To verify: open `https://mail-tracker.YOUR-SUBDOMAIN.workers.dev` in your browser. You should be prompted for a password. Enter any username (it's ignored) and the password you just set.
 
@@ -285,7 +289,9 @@ Get real-time notifications on Slack or Discord when emails are opened:
 4. Run: `pnpm exec wrangler secret put DISCORD_WEBHOOK_URL`
 5. Paste your webhook URL when prompted
 
-Notifications are delivered within ~1 minute of a genuine open. Self-opens are automatically filtered out — you'll never get notified for opening your own emails.
+Notifications need the `[triggers]` cron block from `wrangler.example.toml` in
+your `wrangler.toml`. Without it the scheduled handler never runs and no webhook
+is ever sent. Delivery is within ~1 minute of a genuine open. Self-opens are automatically filtered out — you'll never get notified for opening your own emails.
 
 ---
 
@@ -396,14 +402,17 @@ All endpoints return JSON except `/` (HTML dashboard) and `/t/:id` (serves PNG i
 
 ### Authentication
 
-If you set `DASHBOARD_PASSWORD`, all endpoints except `/t/:id` require HTTP Basic Authentication:
+`DASHBOARD_PASSWORD` is required. Every endpoint except `/t/:id` uses HTTP Basic
+Authentication; without the secret set, the worker refuses all of them with a
+`503` rather than serving them unprotected.
 
 ```bash
 # Example with curl
 curl -u :your-password https://mail-tracker.YOUR-SUBDOMAIN.workers.dev/list
 ```
 
-The username is ignored (can be empty). Only the password matters.
+The username is ignored (can be empty). Only the password matters, and it may
+contain colons.
 
 **Note:** The tracking pixel endpoint (`/t/:id`) is always open so emails can load the image.
 
@@ -412,13 +421,26 @@ The username is ignored (can be empty). Only the password matters.
 | Endpoint | Auth Required | Description |
 |----------|:-------------:|-------------|
 | `GET /` | ✓ | Web dashboard with all pixels |
-| `GET /new` | ✓ | Create a new tracker. Returns `{ id, pixel, html, stats }` |
-| `GET /new?to=email` | ✓ | Create tracker for a specific recipient |
+| `POST /new` | ✓ | Create a tracker from `{ to?, subject?, bodyPreview?, messageId? }`. Returns `{ id, pixel, html, stats }` |
 | `GET /t/:id` | ✗ | Tracking endpoint — serves 1x1 PNG and records the open |
 | `GET /s/:id` | ✓ | Stats for a tracker — returns `{ opens, events[], recipient, skipped, filteredEvents[], hasSenderProtection }` |
-| `GET /list` | ✓ | List all pixels — returns `[{ id, opens, skipped, recipient, lastOpen }]` |
-| `POST /self` | ✓ | Self-view signal — extension sends `{ ids: [...] }` to reclassify recent opens as self-views |
-| `GET /d/:id` | ✓ | Delete a tracker — returns `{ deleted: id }` |
+| `GET /list` | ✓ | List all pixels — returns `[{ id, opens, skipped, recipient, subject, bodyPreview, messageId, createdAt, lastOpen }]` |
+| `POST /self` | ✓ | Self-view signal — extension sends `{ ids: [...] }` (max 50) to reclassify recent opens as self-views |
+| `DELETE /d/:id` | ✓ | Delete a tracker — returns `{ deleted: id }` |
+
+`/new` and `/d/:id` deliberately reject `GET`. A `GET` can be fired from any page
+with an `<img>` tag, and the browser attaches the cached Basic credentials to it.
+
+```bash
+# Create a tracker for a recipient
+curl -u :your-password -X POST -H 'Content-Type: application/json' \
+     -d '{"to":"her@example.com","subject":"Hi"}' \
+     https://mail-tracker.YOUR-SUBDOMAIN.workers.dev/new
+
+# Delete one
+curl -u :your-password -X DELETE \
+     https://mail-tracker.YOUR-SUBDOMAIN.workers.dev/d/THE_ID
+```
 
 ---
 
@@ -546,8 +568,19 @@ You'd need to track **500,000+ trackers** to approach the 1 GB free storage limi
 - **Gmail plain text mode** — if you toggle "Plain text mode" in Gmail's compose menu (three dots → Plain text mode), all HTML is stripped and tracking won't work. This is **off by default** — Gmail always sends HTML, so even a simple "hi" email will include the tracking pixel. Just don't switch to plain text mode.
 - **Plain text emails (other clients)** — if you use a non-Gmail client that sends plain text only, tracking won't work since the `<img>` tag gets stripped
 
+## Testing
+
+```bash
+pnpm test        # node --test, no extra dependencies
+```
+
+---
+
 ## License
 
 [AGPL-3.0](LICENSE)
+
+Note that AGPL section 13 applies to network use: if you deploy a modified copy
+where other people can reach it, you have to offer them its source.
 
 Free to use, share, modify, and contribute. If you modify and deploy it as a service, you must release your source code under the same license.

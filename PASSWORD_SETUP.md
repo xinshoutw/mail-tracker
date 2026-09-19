@@ -1,5 +1,8 @@
 # Setting Dashboard Password
 
+`DASHBOARD_PASSWORD` is **required**. Without it the worker answers every route
+with `503` instead of serving your tracking data unprotected.
+
 ## Option 1: Using Wrangler Secrets (Recommended for Production)
 
 Set the password as a secret (encrypted, not visible in wrangler.toml):
@@ -53,4 +56,6 @@ The extension will now send the password with every API request using Basic Auth
 - All dashboard and API endpoints (`/`, `/list`, `/new`, `/s/:id`, `/d/:id`) require authentication
 - The tracking pixel endpoint (`/t/:id`) does NOT require auth (so emails can load the pixel)
 - Uses HTTP Basic Authentication with empty username and your password
-- If no password is set, all endpoints are open (backward compatible)
+- The password may contain colons
+- If no password is set, every endpoint is refused with `503` — the service will
+  not run unprotected
