@@ -19,21 +19,6 @@ updates:
         patterns: ['*']
         update-types: [minor, patch]
 
-  # Remotion promo video. Dev-only and never shipped to users, so it is grouped
-  # wholesale, majors included.
-  - package-ecosystem: npm
-    directory: /video
-    schedule:
-      interval: weekly
-      day: monday
-    commit-message:
-      prefix: chore(deps)
-    labels: [dependencies]
-    open-pull-requests-limit: 3
-    groups:
-      video:
-        patterns: ['*']
-
   - package-ecosystem: github-actions
     directory: /
     schedule:
