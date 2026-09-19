@@ -1,4 +1,4 @@
-import { CORS_HEADERS, DEDUP_WINDOW_MS, json, isBot, checkAuth, requireAuth, servePixel, html } from './shared.js';
+import { CORS_HEADERS, DEDUP_WINDOW_MS, json, isBot, checkAuth, requireAuth, servePixel, html, putTracker, trackerMeta } from './shared.js';
 import { sendWebhookNotifications } from './notifications.js';
 import { renderDetail } from './views/detail.js';
 import { renderDashboard } from './views/dashboard.js';
@@ -19,6 +19,35 @@ const WEBHOOK_GRACE_MS = 10_000;
 // inside the free plan's 50-subrequest budget. Raise it with the plan if the
 // queue ever backs up.
 const MAX_PENDING_PER_RUN = 10;
+const MAX_TRACKERS = 1000;
+const MAX_LEGACY_READS = 20;
+
+// One subrequest per 1000 trackers instead of one per tracker. Records written
+// before metadata existed still need a read, capped so an old namespace cannot
+// blow the subrequest budget on its own.
+async function listTrackers(env) {
+  const out = [];
+  let legacyReads = 0;
+  let cursor;
+
+  do {
+    const page = await env.TRACKER.list({ cursor });
+    for (const key of page.keys) {
+      if (key.name.startsWith(INTERNAL_PREFIX)) continue;
+
+      let meta = key.metadata;
+      if (!meta && legacyReads < MAX_LEGACY_READS) {
+        legacyReads++;
+        const data = await env.TRACKER.get(key.name, 'json');
+        if (data) meta = trackerMeta(data);
+      }
+      out.push({ id: key.name, ...(meta || {}) });
+    }
+    cursor = page.list_complete ? null : page.cursor;
+  } while (cursor && out.length < MAX_TRACKERS);
+
+  return out;
+}
 
 export default {
   async fetch(request, env) {
@@ -87,7 +116,7 @@ export default {
         }
 
         if (existing.filteredEvents.length > 20) existing.filteredEvents = existing.filteredEvents.slice(-20);
-        await env.TRACKER.put(id, JSON.stringify(existing));
+        await putTracker(env, id, existing);
         console.log(`[self-view] id=${id} reclassified=${reclassified} opens_now=${existing.opens}`);
 
         totalReclassified += reclassified;
@@ -118,7 +147,7 @@ export default {
         existing.filteredEvents = existing.filteredEvents || [];
         existing.filteredEvents.push({ time: now, ip, reason: 'sender_ip' });
         if (existing.filteredEvents.length > 20) existing.filteredEvents = existing.filteredEvents.slice(-20);
-        await env.TRACKER.put(id, JSON.stringify(existing));
+        await putTracker(env, id, existing);
         console.log(`[open] id=${id} SKIPPED reason=sender_ip ip=${ip}`);
         return servePixel();
       }
@@ -129,7 +158,7 @@ export default {
         existing.filteredEvents = existing.filteredEvents || [];
         existing.filteredEvents.push({ time: now, ip, userAgent, reason: 'bot_proxy' });
         if (existing.filteredEvents.length > 20) existing.filteredEvents = existing.filteredEvents.slice(-20);
-        await env.TRACKER.put(id, JSON.stringify(existing));
+        await putTracker(env, id, existing);
         console.log(`[open] id=${id} SKIPPED reason=bot_proxy ua=${userAgent}`);
         return servePixel();
       }
@@ -148,7 +177,7 @@ export default {
       existing.opens += 1;
       existing.events.push({ time: now, ip, country, userAgent });
       if (existing.events.length > 100) existing.events = existing.events.slice(-100);
-      await env.TRACKER.put(id, JSON.stringify(existing));
+      await putTracker(env, id, existing);
 
       console.log(`[open] id=${id} RECORDED opens=${existing.opens} ip=${ip} country=${country} ua=${userAgent}`);
 
@@ -213,11 +242,11 @@ export default {
       if (recipient && !recipient.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return json({ error: 'Invalid email format' }, 400);
       if (subject.length > 500 || bodyPreview.length > 1000) return json({ error: 'Input too long' }, 400);
 
-      await env.TRACKER.put(id, JSON.stringify({
+      await putTracker(env, id, {
         opens: 0, events: [], filteredEvents: [], skipped: 0,
         senderIp, recipient, subject, bodyPreview, messageId,
         createdAt: new Date().toISOString(),
-      }));
+      });
 
       const base = url.origin;
       return json({
@@ -231,19 +260,13 @@ export default {
     if (url.pathname === '/list') {
       if (!checkAuth(request, env)) return requireAuth(env, CORS_HEADERS);
 
-      const list = await env.TRACKER.list();
-      const results = [];
-      for (const key of list.keys) {
-        if (key.name.startsWith(INTERNAL_PREFIX)) continue;
-        const data = await env.TRACKER.get(key.name, 'json');
-        results.push({
-          id: key.name, opens: data?.opens || 0, skipped: data?.skipped || 0,
-          recipient: data?.recipient || null, subject: data?.subject || '',
-          bodyPreview: data?.bodyPreview || '', messageId: data?.messageId || '',
-          lastOpen: data?.events?.length ? data.events[data.events.length - 1].time : null,
-        });
-      }
-      return json(results);
+      const trackers = await listTrackers(env);
+      return json(trackers.map(t => ({
+        id: t.id, opens: t.opens || 0, skipped: t.skipped || 0,
+        recipient: t.recipient || null, subject: t.subject || '',
+        bodyPreview: t.bodyPreview || '', messageId: t.messageId || '',
+        createdAt: t.createdAt || null, lastOpen: t.lastOpen || null,
+      })));
     }
 
     // GET /d/:id — delete a tracking pixel
@@ -259,19 +282,13 @@ export default {
     if (url.pathname === '/') {
       if (!checkAuth(request, env)) return requireAuth(env);
 
-      const list = await env.TRACKER.list();
-      const results = [];
-      for (const key of list.keys) {
-        if (key.name.startsWith(INTERNAL_PREFIX)) continue;
-        const data = await env.TRACKER.get(key.name, 'json');
-        results.push({
-          id: key.name, email: data?.recipient || key.name,
-          subject: data?.subject || '', bodyPreview: data?.bodyPreview || '',
-          opens: data?.opens || 0,
-          lastOpen: data?.events?.length ? data.events[data.events.length - 1].time : 'never',
-          createdAt: data?.createdAt || null,
-        });
-      }
+      const results = (await listTrackers(env)).map(t => ({
+        id: t.id, email: t.recipient || t.id,
+        subject: t.subject || '', bodyPreview: t.bodyPreview || '',
+        opens: t.opens || 0,
+        lastOpen: t.lastOpen || 'never',
+        createdAt: t.createdAt || null,
+      }));
 
       results.sort((a, b) => {
         if (!a.createdAt) return 1;

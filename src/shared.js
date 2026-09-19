@@ -90,6 +90,34 @@ export function requireAuth(env, extraHeaders = {}) {
   });
 }
 
+// KV hands metadata back from list(), so the dashboard can render a page of
+// trackers from a single subrequest instead of one get() per tracker — which
+// blew the Workers subrequest budget (50 on the free plan) at ~50 trackers.
+// Metadata is hard-capped at 1024 bytes, hence the short previews.
+const META_TEXT_LIMIT = 80;
+
+export function trackerMeta(data) {
+  const meta = {
+    opens: data.opens || 0,
+    skipped: data.skipped || 0,
+    recipient: (data.recipient || '').slice(0, 100) || null,
+    subject: (data.subject || '').slice(0, META_TEXT_LIMIT),
+    bodyPreview: (data.bodyPreview || '').slice(0, META_TEXT_LIMIT),
+    messageId: data.messageId || '',
+    createdAt: data.createdAt || null,
+    lastOpen: data.events?.length ? data.events[data.events.length - 1].time : null,
+  };
+  // Multibyte subjects can still overrun the cap; drop the preview rather than
+  // let the whole put() be rejected.
+  if (new TextEncoder().encode(JSON.stringify(meta)).length > 1000) meta.bodyPreview = '';
+  return meta;
+}
+
+/** Every tracker write goes through here: omitting metadata on a put clears it. */
+export function putTracker(env, id, data) {
+  return env.TRACKER.put(id, JSON.stringify(data), { metadata: trackerMeta(data) });
+}
+
 export function servePixel() {
   return new Response(PIXEL, {
     headers: {
