@@ -86,21 +86,14 @@
   function getRecipients(composeForm) {
     const recipients = new Set();
 
-    // Method 1: span[email] inside recipient rows (most reliable in current Gmail)
-    composeForm.querySelectorAll('span[email]').forEach(el => {
-      const email = el.getAttribute('email');
-      if (email && email.includes('@')) recipients.add(email.toLowerCase());
-    });
-
-    // Method 2: data-hovercard-id on recipient chips
-    composeForm.querySelectorAll('[data-hovercard-id]').forEach(el => {
-      const email = el.getAttribute('data-hovercard-id');
-      if (email && email.includes('@')) recipients.add(email.toLowerCase());
-    });
-
-    // Method 3: [email] attribute
+    // [email] covers span[email]; [data-hovercard-id] catches the chip variant.
     composeForm.querySelectorAll('[email]').forEach(el => {
       const email = el.getAttribute('email');
+      if (email && email.includes('@')) recipients.add(email.toLowerCase());
+    });
+
+    composeForm.querySelectorAll('[data-hovercard-id]').forEach(el => {
+      const email = el.getAttribute('data-hovercard-id');
       if (email && email.includes('@')) recipients.add(email.toLowerCase());
     });
 
@@ -221,8 +214,7 @@
     const subject = subjectEl?.textContent?.trim() || '';
     
     // Get timestamp
-    const timeEl = row.querySelector('[title*="2026"]') || row.querySelector('span[title]');
-    const timestamp = timeEl?.getAttribute('title') || '';
+    const timestamp = row.querySelector('span[title]')?.getAttribute('title') || '';
     
     return { threadId, subject, timestamp };
   }
@@ -251,51 +243,6 @@
     
     return null;
   }
-  function addReadIndicators(composeForm) {
-    console.log(LOG, 'Adding read indicators...');
-    
-    // Find all recipient chips in the compose form
-    const recipientChips = composeForm.querySelectorAll('span[email], [data-hovercard-id]');
-    console.log(LOG, 'Found recipient chips:', recipientChips.length);
-    
-    recipientChips.forEach(async (chip) => {
-      const email = chip.getAttribute('email') || chip.getAttribute('data-hovercard-id');
-      if (!email || chip.querySelector('.mail-tracker-status')) return;
-      
-      console.log(LOG, 'Adding indicator for:', email);
-      
-      // Create status indicator
-      const statusEl = document.createElement('span');
-      statusEl.className = 'mail-tracker-status';
-      statusEl.style.cssText = 'margin-left: 6px; font-size: 12px; color: #5f6368; cursor: help; font-weight: bold;';
-      statusEl.textContent = '✓'; // Single tick for sent
-      statusEl.title = 'Sent but not opened yet';
-      
-      // Insert after the chip
-      chip.parentNode.insertBefore(statusEl, chip.nextSibling);
-      console.log(LOG, 'Indicator added for:', email);
-      
-      // Update status with cached data
-      const trackers = await getTrackingData();
-      const tracker = trackers.find(t => t.recipient === email);
-      
-      if (tracker && tracker.opens > 0) {
-        statusEl.textContent = '✓✓'; // Double tick for read
-        statusEl.style.color = '#1a73e8'; // Blue for read
-        
-        const lastOpen = tracker.lastOpen ? new Date(tracker.lastOpen).toLocaleString('en-US', {
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-          month: 'short',
-          day: 'numeric'
-        }) : 'never';
-        
-        statusEl.title = `Opened ${tracker.opens} time${tracker.opens > 1 ? 's' : ''}\nLast opened: ${lastOpen}`;
-      }
-    });
-  }
-
   // Process a compose window — inject pixels for untracked recipients
   async function processCompose(bodyEl) {
     const form = findComposeForm(bodyEl);
@@ -346,11 +293,6 @@
         setTimeout(() => { isSending = false; }, 1000);
       }, 100);
     }, true); // Use capture phase to intercept before Gmail
-  }
-
-  // Periodically update read indicators for open compose windows
-  function startStatusUpdater() {
-    // No periodic updates - only fetch on view changes
   }
 
   // Add read indicators to sent emails in inbox view

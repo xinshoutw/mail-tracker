@@ -139,15 +139,14 @@ async function showSetup(isFirst) {
   const serverInput = document.getElementById('server-input');
   const passwordInput = document.getElementById('password-input');
   
-  // Restore from temporary storage (persists across popup closes)
-  const { tempServerUrl, tempPassword } = await chrome.storage.local.get(['tempServerUrl', 'tempPassword']);
-  
+  // The URL survives a popup close; the password deliberately does not, rather
+  // than sit in plaintext storage for the whole setup session.
+  const { tempServerUrl } = await chrome.storage.local.get(['tempServerUrl']);
+
   serverInput.value = tempServerUrl || serverUrl;
-  passwordInput.value = tempPassword || dashboardPassword;
-  
-  // Save to temp storage on blur (when field loses focus)
+  passwordInput.value = dashboardPassword;
+
   serverInput.onblur = () => chrome.storage.local.set({ tempServerUrl: serverInput.value });
-  passwordInput.onblur = () => chrome.storage.local.set({ tempPassword: passwordInput.value });
 }
 
 function showList() {
@@ -298,6 +297,8 @@ async function loadPixels() {
       if (p.recipient) metaParts.push(p.id);
       metaParts.push(p.lastOpen ? timeAgo(p.lastOpen) : 'No opens yet');
       meta.textContent = metaParts.join(' · ');
+      info.appendChild(meta);
+
       item.appendChild(opens);
       item.appendChild(info);
 
@@ -389,7 +390,7 @@ async function saveSettings() {
   await chrome.storage.sync.set({ serverUrl: input, dashboardPassword: passwordInput, authFailed: false });
   
   // Clear temp storage after successful save
-  await chrome.storage.local.remove(['tempServerUrl', 'tempPassword']);
+  await chrome.storage.local.remove(['tempServerUrl', 'tempPassword']);  // tempPassword: clear any left by an older build
   
   errorEl.style.display = 'none';
   showToast('Connected!');
