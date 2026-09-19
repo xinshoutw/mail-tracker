@@ -80,8 +80,41 @@ export function servePixel() {
   });
 }
 
-export function html(content) {
-  return new Response(content, { headers: { 'Content-Type': 'text/html' } });
+// JSON.stringify leaves "<" untouched, so a value containing "</script>" would
+// close an inline <script> early and run as markup. Anything interpolated into a
+// <script> block must go through this instead.
+const SCRIPT_UNSAFE = /[<\u2028\u2029]/g;
+const SCRIPT_ESCAPES = { '<': '\\u003c', '\u2028': '\\u2028', '\u2029': '\\u2029' };
+
+export function jsonForScript(value) {
+  return JSON.stringify(value).replace(SCRIPT_UNSAFE, c => SCRIPT_ESCAPES[c]);
+}
+
+// Nonce-based CSP: the dashboard and detail pages carry one inline <script> each.
+// Inline style="" attributes are used throughout the markup, so style-src stays
+// 'unsafe-inline' — a nonce there would silently break the layout.
+function csp(nonce) {
+  return [
+    "default-src 'none'",
+    `script-src 'nonce-${nonce}'`,
+    "style-src 'unsafe-inline'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
+
+export function html(content, nonce) {
+  return new Response(content, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': csp(nonce),
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
 }
 
 export function esc(str) {

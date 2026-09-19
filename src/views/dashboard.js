@@ -1,6 +1,6 @@
-import { FAVICON, LOGO_SVG } from '../shared.js';
+import { jsonForScript, FAVICON, LOGO_SVG } from '../shared.js';
 
-export function renderDashboard(results, totalOpens, activeCount) {
+export function renderDashboard(results, totalOpens, activeCount, nonce) {
   return `<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
@@ -96,10 +96,10 @@ export function renderDashboard(results, totalOpens, activeCount) {
       </div>
     </div>
   </div>
-  <script>
-    var DATA = ${JSON.stringify(results)};
-    var TOTAL_OPENS = ${JSON.stringify(totalOpens)};
-    var ACTIVE_COUNT = ${JSON.stringify(activeCount)};
+  <script nonce="${nonce}">
+    var DATA = ${jsonForScript(results)};
+    var TOTAL_OPENS = ${jsonForScript(totalOpens)};
+    var ACTIVE_COUNT = ${jsonForScript(activeCount)};
     document.getElementById('totalTrackers').textContent = DATA.length;
     document.getElementById('totalOpens').textContent = TOTAL_OPENS;
     document.getElementById('activeCount').textContent = ACTIVE_COUNT;

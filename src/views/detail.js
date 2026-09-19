@@ -1,6 +1,6 @@
-import { esc, FAVICON } from '../shared.js';
+import { esc, jsonForScript, FAVICON } from '../shared.js';
 
-export function renderDetail(id, data) {
+export function renderDetail(id, data, nonce) {
   const events = data.events || [];
   const filteredEvents = data.filteredEvents || [];
   const recipient = data.recipient || id;
@@ -152,20 +152,20 @@ export function renderDetail(id, data) {
     </div>
   </div>
 
-  <script>
+  <script nonce="${nonce}">
     var DATA = {
-      id: ${JSON.stringify(id)},
-      recipient: ${JSON.stringify(recipient)},
-      subject: ${JSON.stringify(data.subject || '')},
-      opens: ${JSON.stringify(data.opens || 0)},
-      skipped: ${JSON.stringify(data.skipped || 0)},
-      hasSenderIp: ${JSON.stringify(!!data.senderIp)},
-      createdAt: ${JSON.stringify(data.createdAt || null)},
-      firstOpen: ${JSON.stringify(firstOpen)},
-      lastOpen: ${JSON.stringify(lastOpenTime)},
-      uniqueIps: ${JSON.stringify(uniqueIps)},
-      events: ${JSON.stringify(events)},
-      filtered: ${JSON.stringify(filteredEvents)},
+      id: ${jsonForScript(id)},
+      recipient: ${jsonForScript(recipient)},
+      subject: ${jsonForScript(data.subject || '')},
+      opens: ${jsonForScript(data.opens || 0)},
+      skipped: ${jsonForScript(data.skipped || 0)},
+      hasSenderIp: ${jsonForScript(!!data.senderIp)},
+      createdAt: ${jsonForScript(data.createdAt || null)},
+      firstOpen: ${jsonForScript(firstOpen)},
+      lastOpen: ${jsonForScript(lastOpenTime)},
+      uniqueIps: ${jsonForScript(uniqueIps)},
+      events: ${jsonForScript(events)},
+      filtered: ${jsonForScript(filteredEvents)},
       dailyOpens: {}
     };
 

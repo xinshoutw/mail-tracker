@@ -168,7 +168,8 @@ export default {
         return json({ ...safeData, recipient: data.recipient || null, hasSenderProtection: !!senderIp });
       }
 
-      return html(renderDetail(id, data));
+      const nonce = crypto.randomUUID();
+      return html(renderDetail(id, data, nonce), nonce);
     }
 
     // GET/POST /new — create a new tracking pixel
@@ -264,7 +265,8 @@ export default {
       const totalOpens = results.reduce((s, r) => s + r.opens, 0);
       const activeCount = results.filter(r => r.opens > 0).length;
 
-      return html(renderDashboard(results, totalOpens, activeCount));
+      const nonce = crypto.randomUUID();
+      return html(renderDashboard(results, totalOpens, activeCount, nonce), nonce);
     }
 
     return new Response('Not found', { status: 404 });
