@@ -1,0 +1,7 @@
+# wrangler builds and runs the worker through esbuild and workerd, so both need
+# to run their install scripts. sharp is only used by wrangler's optional image
+# handling and is not needed here.
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: false
