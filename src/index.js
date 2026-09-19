@@ -9,6 +9,17 @@ const SELF_VIEW_WINDOW_MS = 5_000;
 // ~77k trackers, and cheap to enumerate. 16 hex chars is 64 bits.
 const ID_LENGTH = 16;
 
+// Keys the worker owns. They share the tracker namespace, so listings must skip
+// them or they show up in the dashboard as phantom trackers.
+const INTERNAL_PREFIX = '__';
+const PENDING_PREFIX = '__pending__:';
+const PENDING_TTL_S = 3600;
+const WEBHOOK_GRACE_MS = 10_000;
+// ponytail: 10 webhooks a minute is plenty for one mailbox and keeps the cron
+// inside the free plan's 50-subrequest budget. Raise it with the plan if the
+// queue ever backs up.
+const MAX_PENDING_PER_RUN = 10;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -141,15 +152,15 @@ export default {
 
       console.log(`[open] id=${id} RECORDED opens=${existing.opens} ip=${ip} country=${country} ua=${userAgent}`);
 
-      // Queue webhook — cron will send it after self-view window passes
-      const pending = await env.TRACKER.get('__pending_webhooks__', 'json') || [];
-      pending.push({
-        id, time: now, ip, country,
-        recipient: existing.recipient,
-        subject: existing.subject,
-        opens: existing.opens,
-      });
-      await env.TRACKER.put('__pending_webhooks__', JSON.stringify(pending));
+      // Queue the webhook under its own key. Appending to one shared key meant a
+      // read-modify-write per open: KV caps writes at one per second per key, and
+      // concurrent opens silently overwrote each other's entries. The TTL keeps an
+      // abandoned queue from growing without bound if the cron trigger is missing.
+      await env.TRACKER.put(
+        `${PENDING_PREFIX}${nowMs}:${id}`,
+        JSON.stringify({ id, time: now, ip, country, recipient: existing.recipient, subject: existing.subject }),
+        { expirationTtl: PENDING_TTL_S },
+      );
 
       return servePixel();
     }
@@ -223,6 +234,7 @@ export default {
       const list = await env.TRACKER.list();
       const results = [];
       for (const key of list.keys) {
+        if (key.name.startsWith(INTERNAL_PREFIX)) continue;
         const data = await env.TRACKER.get(key.name, 'json');
         results.push({
           id: key.name, opens: data?.opens || 0, skipped: data?.skipped || 0,
@@ -250,6 +262,7 @@ export default {
       const list = await env.TRACKER.list();
       const results = [];
       for (const key of list.keys) {
+        if (key.name.startsWith(INTERNAL_PREFIX)) continue;
         const data = await env.TRACKER.get(key.name, 'json');
         results.push({
           id: key.name, email: data?.recipient || key.name,
@@ -277,34 +290,26 @@ export default {
   },
 
   async scheduled(event, env) {
-    const pending = await env.TRACKER.get('__pending_webhooks__', 'json');
-    if (!pending || pending.length === 0) return;
-
+    const { keys } = await env.TRACKER.list({ prefix: PENDING_PREFIX, limit: MAX_PENDING_PER_RUN });
     const now = Date.now();
-    const remaining = [];
 
-    for (const item of pending) {
-      const age = now - new Date(item.time).getTime();
+    for (const key of keys) {
+      const item = await env.TRACKER.get(key.name, 'json');
+      if (!item) continue;
 
-      // Wait at least 10s for self-view reclassification to happen
-      if (age < 10_000) {
-        remaining.push(item);
-        continue;
-      }
+      // Too young — leave it queued so /self still has time to reclassify it.
+      if (now - new Date(item.time).getTime() < WEBHOOK_GRACE_MS) continue;
 
-      // Check if this open is still in events (not reclassified as self-view)
+      await env.TRACKER.delete(key.name);
+
       const tracker = await env.TRACKER.get(item.id, 'json');
       if (!tracker) continue;
 
-      const stillExists = tracker.events.some(e => e.time === item.time && e.ip === item.ip);
-      if (!stillExists) {
+      const stillGenuine = (tracker.events || []).some(e => e.time === item.time && e.ip === item.ip);
+      if (!stillGenuine) {
         console.log(`[cron] id=${item.id} open was reclassified, skipping webhook`);
         continue;
       }
-
-      // Genuine open — send webhook
-      const timeStr = new Date(item.time).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-      const timezone = new Date(item.time).toLocaleString('en-US', { timeZoneName: 'short' }).split(' ').pop();
 
       await sendWebhookNotifications(env, {
         recipient: item.recipient,
@@ -312,15 +317,9 @@ export default {
         opens: tracker.opens,
         country: item.country,
         ip: item.ip,
-        time: `${timeStr} (${timezone})`,
+        time: item.time,
       });
       console.log(`[cron] id=${item.id} webhook sent for genuine open`);
-    }
-
-    if (remaining.length > 0) {
-      await env.TRACKER.put('__pending_webhooks__', JSON.stringify(remaining));
-    } else {
-      await env.TRACKER.delete('__pending_webhooks__');
     }
   },
 };

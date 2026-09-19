@@ -1,111 +1,95 @@
-// Webhook notification handlers for Slack and Discord
+// Webhook notification handlers for Slack and Discord.
+//
+// Timestamps go out as native Slack/Discord date tokens rather than a formatted
+// string: the worker has no access to the reader's timezone, so anything it
+// formats itself would always render as UTC.
 
-/**
- * Send notification to Slack webhook
- */
-async function sendSlackNotification(webhookUrl, data) {
-  const message = {
-    text: `📬 *Email Opened*\n\n*Recipient:* ${data.recipient || 'Unknown'}\n*Subject:* ${data.subject || 'No subject'}\n*Opens:* ${data.opens}\n*Time:* ${data.time}\n\n© Mail Tracker - <https://github.com/samrathreddy/mail-tracker|GitHub>`
-  };
+const DISCORD_FIELD_LIMIT = 1024;
+const REPO_URL = 'https://github.com/samrathreddy/mail-tracker';
 
+/** Neutralise Slack mrkdwn control characters, including <!channel> pings. */
+function escapeSlack(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function unixSeconds(iso) {
+  const ms = new Date(iso).getTime();
+  return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+}
+
+function slackTime(iso) {
+  const ts = unixSeconds(iso);
+  return ts === null ? escapeSlack(iso) : `<!date^${ts}^{date_short_pretty} {time}|${ts}>`;
+}
+
+function discordTime(iso) {
+  const ts = unixSeconds(iso);
+  return ts === null ? iso : `<t:${ts}:f>`;
+}
+
+function fit(str, fallback) {
+  const value = String(str || '').slice(0, DISCORD_FIELD_LIMIT);
+  return value || fallback;
+}
+
+async function post(url, body, label) {
   try {
-    const response = await fetch(webhookUrl, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(message)
+      body: JSON.stringify(body),
     });
-    console.log('Slack response:', response.status, response.ok);
+    if (!response.ok) console.error(`${label} webhook returned ${response.status}`);
     return response.ok;
   } catch (e) {
-    console.error('Slack notification failed:', e);
+    console.error(`${label} webhook failed:`, e.message);
     return false;
   }
 }
 
-/**
- * Send notification to Discord webhook
- */
-async function sendDiscordNotification(webhookUrl, data) {
-  const message = {
-    embeds: [{
-      title: "📬 Email Opened",
-      color: 0x34A853,
-      fields: [
-        {
-          name: "Recipient",
-          value: data.recipient || 'Unknown',
-          inline: false
-        },
-        {
-          name: "Subject",
-          value: data.subject || 'No subject',
-          inline: false
-        },
-        {
-          name: "Opens",
-          value: String(data.opens),
-          inline: true
-        },
-        {
-          name: "Time",
-          value: data.time,
-          inline: true
-        }
-      ],
-      footer: {
-        text: "© Mail Tracker"
-      },
-      timestamp: new Date().toISOString()
-    }]
+function slackNotification(webhookUrl, data) {
+  const text = [
+    '📬 *Email Opened*',
+    '',
+    `*Recipient:* ${escapeSlack(data.recipient || 'Unknown')}`,
+    `*Subject:* ${escapeSlack(data.subject || 'No subject')}`,
+    `*Opens:* ${data.opens}`,
+    `*Time:* ${slackTime(data.time)}`,
+    '',
+    `© Mail Tracker - <${REPO_URL}|GitHub>`,
+  ].join('\n');
+
+  return post(webhookUrl, { text }, 'Slack');
+}
+
+function discordNotification(webhookUrl, data) {
+  const embed = {
+    title: '📬 Email Opened',
+    color: 0x34a853,
+    fields: [
+      { name: 'Recipient', value: fit(data.recipient, 'Unknown'), inline: false },
+      { name: 'Subject', value: fit(data.subject, 'No subject'), inline: false },
+      { name: 'Opens', value: String(data.opens), inline: true },
+      { name: 'Time', value: discordTime(data.time), inline: true },
+    ],
+    footer: { text: '© Mail Tracker' },
+    timestamp: new Date().toISOString(),
   };
 
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(message)
-    });
-    console.log('Discord response:', response.status, response.ok);
-    return response.ok;
-  } catch (e) {
-    console.error('Discord notification failed:', e);
-    return false;
-  }
+  return post(webhookUrl, { embeds: [embed] }, 'Discord');
 }
 
 /**
- * Send notifications to all configured webhooks
- * @param {Object} env - Cloudflare environment with webhook URLs
- * @param {Object} data - Email open data
+ * Send notifications to every configured webhook.
+ * @param {Object} env - Cloudflare environment holding the webhook URLs
+ * @param {Object} data - Open event: recipient, subject, opens, country, ip, time (ISO)
  */
 export async function sendWebhookNotifications(env, data) {
-  const promises = [];
+  const sends = [];
+  if (env.SLACK_WEBHOOK_URL) sends.push(slackNotification(env.SLACK_WEBHOOK_URL, data));
+  if (env.DISCORD_WEBHOOK_URL) sends.push(discordNotification(env.DISCORD_WEBHOOK_URL, data));
 
-  console.log('sendWebhookNotifications called with:', data);
-
-  if (env.SLACK_WEBHOOK_URL) {
-    console.log('Sending to Slack...');
-    promises.push(sendSlackNotification(env.SLACK_WEBHOOK_URL, data));
-  } else {
-    console.log('No Slack webhook URL');
-  }
-
-  if (env.DISCORD_WEBHOOK_URL) {
-    console.log('Sending to Discord...');
-    promises.push(sendDiscordNotification(env.DISCORD_WEBHOOK_URL, data));
-  } else {
-    console.log('No Discord webhook URL');
-  }
-
-  // Send all notifications in parallel and wait for completion
-  if (promises.length > 0) {
-    try {
-      await Promise.all(promises);
-      console.log('All webhooks sent successfully');
-    } catch (e) {
-      console.error('Webhook notifications failed:', e);
-    }
-  } else {
-    console.log('No webhooks configured');
-  }
+  // Each sender already swallows its own failure, so one dead webhook cannot
+  // stop the other from going out.
+  await Promise.all(sends);
 }
