@@ -49,7 +49,7 @@ async function post(url, body, label) {
 
 function slackNotification(webhookUrl, data) {
   const text = [
-    '📬 *Email Opened*',
+    '*Email Opened*',
     '',
     `*Recipient:* ${escapeSlack(data.recipient || 'Unknown')}`,
     `*Subject:* ${escapeSlack(data.subject || 'No subject')}`,
@@ -64,7 +64,7 @@ function slackNotification(webhookUrl, data) {
 
 function discordNotification(webhookUrl, data) {
   const embed = {
-    title: '📬 Email Opened',
+    title: 'Email Opened',
     color: 0x34a853,
     fields: [
       { name: 'Recipient', value: fit(data.recipient, 'Unknown'), inline: false },

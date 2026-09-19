@@ -203,6 +203,29 @@
     }
   }
 
+  // Read receipts are drawn rather than typed: the check glyphs rendered
+  // inconsistently across platforms, and inline SVG matches how the rest of
+  // this project ships icons.
+  function makeTicks(double) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', double ? '0 0 20 14' : '0 0 14 14');
+    svg.setAttribute('width', double ? '16' : '12');
+    svg.setAttribute('height', '11');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    const path = d => {
+      const el = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      el.setAttribute('d', d);
+      return el;
+    };
+    svg.appendChild(path('M1 7.5 L5 11.5 L12 2.5'));
+    if (double) svg.appendChild(path('M8.5 11 L9 11.5 L18 2.5'));
+    return svg;
+  }
+
   // Extract unique identifiers from Gmail thread
   function getEmailIdentifiers(row) {
     // Try to get Gmail's thread ID or message ID
@@ -344,7 +367,7 @@
       statusEl.style.cssText = 'margin-left: 6px; font-size: 11px; color: #5f6368; cursor: help; font-weight: bold;';
       
       if (tracker.opens > 0) {
-        statusEl.textContent = '✓✓'; // Double tick for read
+        statusEl.replaceChildren(makeTicks(true));
         statusEl.style.color = '#1a73e8'; // Blue for read
         
         const lastOpen = tracker.lastOpen ? new Date(tracker.lastOpen).toLocaleString('en-US', {
@@ -357,7 +380,7 @@
         
         statusEl.title = `Opened ${tracker.opens} time${tracker.opens > 1 ? 's' : ''}\nLast opened: ${lastOpen}`;
       } else {
-        statusEl.textContent = '✓'; // Single tick for sent
+        statusEl.replaceChildren(makeTicks(false));
         statusEl.title = 'Sent but not opened yet';
       }
       

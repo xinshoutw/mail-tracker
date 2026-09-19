@@ -311,9 +311,19 @@ async function loadPixels() {
     pixelContainer.textContent = '';
     const empty = document.createElement('div');
     empty.className = 'empty';
-    const icon = document.createElement('div');
-    icon.style.fontSize = '24px';
-    icon.textContent = '⚠️';
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.setAttribute('width', '24');
+    icon.setAttribute('height', '24');
+    icon.setAttribute('fill', 'none');
+    icon.setAttribute('stroke', '#ef4444');
+    icon.setAttribute('stroke-width', '2');
+    icon.setAttribute('stroke-linecap', 'round');
+    for (const d of ['M12 9v4', 'M12 17h.01', 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z']) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      icon.appendChild(path);
+    }
     const text = document.createElement('p');
     if (err.message === 'Authentication required') {
       text.textContent = 'Password incorrect. Please update your settings.';
