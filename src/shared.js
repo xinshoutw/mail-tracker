@@ -8,21 +8,24 @@ export const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+// Only genuine non-human fetchers belong here.
+//
+// Mail provider image proxies do NOT: Gmail and Yahoo Mail route every image
+// through their own proxy, so that request IS the recipient's open and the only
+// signal this service ever gets. Filtering GoogleImageProxy and its 66.249.0.0/16
+// range meant every Gmail recipient — most recipients — recorded zero opens.
+// Outlook and Thunderbird are ordinary clients driven by a person, not bots.
+//
+// The sender's own views are caught elsewhere: by the sender-IP filter, and by
+// POST /self, which reclassifies an open when the extension sees the sender
+// open their own thread.
 export const BOT_PATTERNS = [
-  /GoogleImageProxy/i,
-  /Google-SMTP-STS/i,
-  /Yahoo! Slurp/i,
-  /Outlook-iOS/i,
-  /Microsoft Outlook/i,
-  /ms-office/i,
+  /Google-SMTP-STS/i, // SMTP TLS reporting, never a reader
+  /Yahoo! Slurp/i,    // search crawler
+  /Safelinks/i,       // Microsoft link-safety prefetch
+  /ms-office/i,       // Office prefetch
   /BCLinked/i,
-  /Safelinks/i,
-  /YahooMailProxy/i,
-  /Thunderbird/i,
 ];
-
-// Google Image Proxy IP ranges (66.249.x.x used by Gmail proxy)
-export const PROXY_IP_PREFIXES = ['66.249.'];
 
 export const DEDUP_WINDOW_MS = 5000;
 
@@ -37,10 +40,8 @@ export function json(data, status = 200) {
   });
 }
 
-export function isBot(userAgent, ip) {
-  if (userAgent && BOT_PATTERNS.some(pattern => pattern.test(userAgent))) return true;
-  if (ip && PROXY_IP_PREFIXES.some(prefix => ip.startsWith(prefix))) return true;
-  return false;
+export function isBot(userAgent) {
+  return !!userAgent && BOT_PATTERNS.some(pattern => pattern.test(userAgent));
 }
 
 // Length is not hidden, only the contents. Good enough for a shared password
