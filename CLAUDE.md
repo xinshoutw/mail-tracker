@@ -141,6 +141,20 @@ their own thread.
 - Per-recipient tracking: each recipient gets their own pixel ID
 - Background service worker polls for new opens
 
+## Deployment
+
+- The worker deploys through **Cloudflare Workers Builds** on push to `main`,
+  not from GitHub Actions. `wrangler.toml` is committed because Workers Builds
+  reads the config out of the repository.
+- Secrets live only in the Cloudflare dashboard. Saving one there creates a new
+  version but does **not** roll it out — the Deploy button still has to be
+  pressed, otherwise the worker keeps serving the previous version without it.
+- Workers cannot be renamed. Changing `name` in `wrangler.toml` deploys a second
+  script and leaves the old one, its secrets and its Builds connection behind.
+- `.github/workflows/ci.yml` runs the suite and a `--dry-run` build on every
+  push and pull request. `release-extension.yml` packages `extension/` when a
+  `v*` tag is pushed, and fails if the tag and `manifest.json` disagree.
+
 ## Setup
 
 1. Cloudflare account with Workers + KV enabled

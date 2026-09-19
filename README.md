@@ -462,6 +462,11 @@ mail-tracker/
 │   ├── background.js      # Service worker (polling & notifications)
 │   ├── gmail.js           # Content script (auto-inject + self-view detection)
 │   └── icons/             # Extension icons (16/48/128px)
+├── test/
+│   └── worker.test.js     # node --test suite against an in-memory KV stub
+├── .github/workflows/
+│   ├── ci.yml             # Tests + worker build check on push and PR
+│   └── release-extension.yml  # Packages extension/ on a v* tag
 ├── wrangler.toml          # Cloudflare Workers config (KV + cron trigger)
 ├── CLAUDE.md              # AI assistant project guide
 ├── package.json
@@ -573,6 +578,39 @@ You'd need to track **500,000+ trackers** to approach the 1 GB free storage limi
 ```bash
 pnpm test        # node --test, no extra dependencies
 ```
+
+---
+
+## Deployment & CI/CD
+
+Two independent pipelines:
+
+| What | Runs on | Triggered by |
+|------|---------|--------------|
+| Worker deploy | Cloudflare [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) | push to `main` |
+| Tests + build check | GitHub Actions (`ci.yml`) | push, pull request, manual |
+| Extension release | GitHub Actions (`release-extension.yml`) | pushing a `v*` tag |
+
+### Worker
+
+Connect the repository under **Workers & Pages → your worker → Settings → Build**.
+Leave the build command empty and the deploy command at `npx wrangler deploy`;
+Cloudflare generates the API token for you. `wrangler.toml` must be committed,
+since Workers Builds reads the config from the repository.
+
+Secrets are **not** deployed from this repo. Set them under **Settings →
+Variables and Secrets** as type *Secret*, then press **Deploy** — saving a
+secret only creates a new version, it does not roll it out.
+
+### Extension
+
+```bash
+# bump extension/manifest.json to 1.2.0 first, then:
+git tag v1.2.0 && git push origin main v1.2.0
+```
+
+The release job refuses to publish when the tag and `extension/manifest.json`
+disagree, so a zip can never ship under the wrong version.
 
 ---
 
