@@ -198,6 +198,22 @@ describe('open filtering', () => {
     assert.equal(isBot(''), false);
   });
 
+  test('a hammered bot hit is not written to KV every time', async () => {
+    // /t/:id takes no auth, so an unbounded write per request was free for
+    // anyone holding the pixel URL.
+    const id = await createTracker();
+    for (let i = 0; i < 5; i++) await openPixel(id, { userAgent: 'Safelinks' });
+    const data = await read(id);
+    assert.equal(data.skipped, 1, 'only the first hit in the window is recorded');
+    assert.equal(data.filteredEvents.length, 1);
+  });
+
+  test('a hammered sender-IP hit is likewise written once', async () => {
+    const id = await createTracker();
+    for (let i = 0; i < 5; i++) await openPixel(id, { ip: SENDER_IP });
+    assert.equal((await read(id)).filteredEvents.length, 1);
+  });
+
   test('an unknown pixel still serves a PNG without creating a record', async () => {
     const res = await openPixel('does-not-exist');
     assert.equal(res.status, 200);

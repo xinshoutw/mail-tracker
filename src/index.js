@@ -23,6 +23,17 @@ const MAX_TRACKERS = 1000;
 const MAX_LEGACY_READS = 20;
 const MAX_SELF_VIEW_IDS = 50;
 
+/**
+ * A repeat hit from the same IP inside the dedup window. /t/:id is
+ * unauthenticated, and the sender-IP and bot branches used to write to KV on
+ * every single request, so anyone holding a pixel URL could drive unbounded
+ * writes just by resending with a scanner's User-Agent.
+ */
+function isRepeatHit(events, ip, nowMs) {
+  const last = events.length ? events[events.length - 1] : null;
+  return !!last && last.ip === ip && nowMs - new Date(last.time).getTime() < DEDUP_WINDOW_MS;
+}
+
 // One subrequest per 1000 trackers instead of one per tracker. Records written
 // before metadata existed still need a read, capped so an old namespace cannot
 // blow the subrequest budget on its own.
@@ -147,6 +158,7 @@ export default {
 
       // Filter 1: Sender IP exclusion
       if (existing.senderIp && existing.senderIp === ip) {
+        if (isRepeatHit(existing.filteredEvents || [], ip, nowMs)) return servePixel();
         existing.skipped = (existing.skipped || 0) + 1;
         existing.filteredEvents = existing.filteredEvents || [];
         existing.filteredEvents.push({ time: now, ip, reason: 'sender_ip' });
@@ -158,6 +170,7 @@ export default {
 
       // Filter 2: Bot/proxy detection
       if (isBot(userAgent)) {
+        if (isRepeatHit(existing.filteredEvents || [], ip, nowMs)) return servePixel();
         existing.skipped = (existing.skipped || 0) + 1;
         existing.filteredEvents = existing.filteredEvents || [];
         existing.filteredEvents.push({ time: now, ip, userAgent, reason: 'bot_proxy' });
@@ -168,13 +181,9 @@ export default {
       }
 
       // Filter 3: Dedup window (same IP within 5s)
-      const lastEvent = existing.events.length > 0 ? existing.events[existing.events.length - 1] : null;
-      if (lastEvent && lastEvent.ip === ip) {
-        const lastTime = new Date(lastEvent.time).getTime();
-        if (nowMs - lastTime < DEDUP_WINDOW_MS) {
-          console.log(`[open] id=${id} SKIPPED reason=dedup (${nowMs - lastTime}ms since last)`);
-          return servePixel();
-        }
+      if (isRepeatHit(existing.events, ip, nowMs)) {
+        console.log(`[open] id=${id} SKIPPED reason=dedup ip=${ip}`);
+        return servePixel();
       }
 
       // Record the open — extension will retroactively reclassify if it was a self-view
