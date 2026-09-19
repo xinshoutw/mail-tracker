@@ -90,9 +90,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // --- API helpers ---
-async function api(path) {
+async function api(path, options = {}) {
   const headers = {
-    'Accept': 'application/json'
+    'Accept': 'application/json',
+    ...(options.headers || {}),
   };
   if (dashboardPassword) {
     headers['Authorization'] = 'Basic ' + btoa(':' + dashboardPassword);
@@ -102,7 +103,8 @@ async function api(path) {
   const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
   
   try {
-    const res = await fetch(`${serverUrl}${path}`, { 
+    const res = await fetch(`${serverUrl}${path}`, {
+      ...options,
       headers,
       signal: controller.signal
     });
@@ -325,7 +327,11 @@ async function loadPixels() {
 
 async function createPixel() {
   try {
-    const data = await api('/new');
+    const data = await api('/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
     showToast(`Tracker "${data.id}" created!`);
     loadPixels();
   } catch (err) {
@@ -338,7 +344,7 @@ async function deleteCurrentPixel() {
   if (!confirm(`Delete tracker "${currentPixelId}"? This cannot be undone.`)) return;
 
   try {
-    await api(`/d/${currentPixelId}`);
+    await api(`/d/${currentPixelId}`, { method: 'DELETE' });
     showToast('Tracker deleted');
     showList();
   } catch (err) {

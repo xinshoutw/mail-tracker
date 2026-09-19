@@ -21,6 +21,7 @@ const WEBHOOK_GRACE_MS = 10_000;
 const MAX_PENDING_PER_RUN = 10;
 const MAX_TRACKERS = 1000;
 const MAX_LEGACY_READS = 20;
+const MAX_SELF_VIEW_IDS = 50;
 
 // One subrequest per 1000 trackers instead of one per tracker. Records written
 // before metadata existed still need a read, capped so an old namespace cannot
@@ -67,6 +68,9 @@ export default {
         const body = await request.json();
         ids = body.ids;
         if (!Array.isArray(ids) || ids.length === 0) return json({ error: 'ids must be a non-empty array' }, 400);
+        // Each id costs a KV read plus a write; an unbounded batch would run
+        // straight into the subrequest limit.
+        if (ids.length > MAX_SELF_VIEW_IDS) return json({ error: `At most ${MAX_SELF_VIEW_IDS} ids per call` }, 400);
       } catch (e) {
         return json({ error: 'Invalid JSON body' }, 400);
       }
@@ -129,8 +133,8 @@ export default {
 
     // GET /t/:id — track pixel open
     if (url.pathname.startsWith('/t/')) {
-      const id = url.pathname.split('/t/')[1];
-      if (!id) return new Response('Missing id', { status: 400 });
+      const id = url.pathname.slice('/t/'.length);
+      if (!id || id.startsWith(INTERNAL_PREFIX)) return new Response('Missing id', { status: 400 });
 
       const existing = await env.TRACKER.get(id, 'json');
       if (!existing) return servePixel();
@@ -198,8 +202,8 @@ export default {
     if (url.pathname.startsWith('/s/')) {
       if (!checkAuth(request, env)) return requireAuth(env);
 
-      const id = url.pathname.split('/s/')[1];
-      if (!id) return new Response('Missing id', { status: 400 });
+      const id = url.pathname.slice('/s/'.length);
+      if (!id || id.startsWith(INTERNAL_PREFIX)) return new Response('Missing id', { status: 400 });
 
       const data = await env.TRACKER.get(id, 'json');
       if (!data) return new Response('Tracker not found', { status: 404 });
@@ -216,27 +220,25 @@ export default {
       return html(renderDetail(id, data, nonce), nonce);
     }
 
-    // GET/POST /new — create a new tracking pixel
+    // POST /new — create a new tracking pixel
     if (url.pathname === '/new') {
       if (!checkAuth(request, env)) return requireAuth(env, CORS_HEADERS);
+      // State changes are POST/DELETE only. A GET can be fired from any page
+      // with an <img> tag, and browsers attach cached Basic credentials to it.
+      if (request.method !== 'POST') return json({ error: 'Use POST' }, 405);
 
       const id = crypto.randomUUID().replace(/-/g, '').slice(0, ID_LENGTH);
       const senderIp = request.headers.get('cf-connecting-ip') || 'unknown';
 
       let recipient = null, subject = '', bodyPreview = '', messageId = '';
-
-      if (request.method === 'POST') {
-        try {
-          const body = await request.json();
-          recipient = body.to || null;
-          subject = body.subject || '';
-          bodyPreview = body.bodyPreview || '';
-          messageId = body.messageId || '';
-        } catch (e) {
-          return json({ error: 'Invalid JSON body' }, 400);
-        }
-      } else {
-        recipient = url.searchParams.get('to') || null;
+      try {
+        const body = await request.json();
+        recipient = body.to || null;
+        subject = body.subject || '';
+        bodyPreview = body.bodyPreview || '';
+        messageId = body.messageId || '';
+      } catch (e) {
+        return json({ error: 'Invalid JSON body' }, 400);
       }
 
       if (recipient && !recipient.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return json({ error: 'Invalid email format' }, 400);
@@ -269,11 +271,14 @@ export default {
       })));
     }
 
-    // GET /d/:id — delete a tracking pixel
-    if (url.pathname.startsWith('/d/') && request.method === 'GET') {
-      if (!checkAuth(request, env)) return requireAuth(env);
-      const id = url.pathname.split('/d/')[1];
-      if (!id) return json({ error: 'Missing id' }, 400);
+    // DELETE /d/:id — delete a tracking pixel
+    if (url.pathname.startsWith('/d/')) {
+      if (!checkAuth(request, env)) return requireAuth(env, CORS_HEADERS);
+      // Was a GET: <img src="https://tracker/d/:id"> on any page deleted a
+      // tracker, since the browser attached the owner's cached credentials.
+      if (request.method !== 'DELETE') return json({ error: 'Use DELETE' }, 405);
+      const id = url.pathname.slice('/d/'.length);
+      if (!id || id.startsWith(INTERNAL_PREFIX)) return json({ error: 'Missing id' }, 400);
       await env.TRACKER.delete(id);
       return json({ deleted: id });
     }
