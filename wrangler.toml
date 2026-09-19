@@ -1,0 +1,20 @@
+name = "mail-tracker"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+account_id = "a4115182ce1be41e47fe040e51476a53"
+
+[[kv_namespaces]]
+binding = "TRACKER"
+id = "401b91f449a84845bf61839f20078519"  # namespace title: email-tracker-xinshoutw
+
+# Drains queued webhooks a short delay after each open, so a self-view has time
+# to be reclassified first. Without this trigger the scheduled() handler never
+# runs and Slack/Discord notifications never fire.
+[triggers]
+crons = ["* * * * *"]
+
+# Secrets are NOT set here. They live in the Cloudflare dashboard under
+# Settings -> Variables and Secrets:
+#   DASHBOARD_PASSWORD   (required — the worker refuses every route without it)
+#   SLACK_WEBHOOK_URL    (optional)
+#   DISCORD_WEBHOOK_URL  (optional)
