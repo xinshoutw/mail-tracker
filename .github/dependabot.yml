@@ -1,0 +1,47 @@
+version: 2
+
+# Everything is grouped into a single pull request per ecosystem. This repo has
+# one runtime dependency (none) and a handful of dev tools, so a PR per package
+# would be pure noise.
+updates:
+  # Worker toolchain — wrangler only. Its major versions carry real behaviour
+  # changes, so they stay in their own PR rather than riding along with a patch.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore(deps)
+    labels: [dependencies]
+    groups:
+      worker-toolchain:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # Remotion promo video. Dev-only and never shipped to users, so it is grouped
+  # wholesale, majors included.
+  - package-ecosystem: npm
+    directory: /video
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore(deps)
+    labels: [dependencies]
+    open-pull-requests-limit: 3
+    groups:
+      video:
+        patterns: ['*']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore(ci)
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ['*']
