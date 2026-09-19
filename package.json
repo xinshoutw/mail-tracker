@@ -9,7 +9,7 @@
     "test": "node --test"
   },
   "devDependencies": {
-    "wrangler": "^4.72.0"
+    "wrangler": "^4.135.0"
   },
   "type": "module",
   "pnpm": {
