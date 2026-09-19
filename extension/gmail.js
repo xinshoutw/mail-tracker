@@ -52,7 +52,7 @@
       }
       
       console.log(LOG, 'Making /list API call');
-      const res = await fetch(`${serverUrl}/list`, { headers });
+      const res = await fetch(`${serverUrl}/list`, { headers, signal: AbortSignal.timeout(NEW_PIXEL_TIMEOUT_MS) });
       if (res.ok) {
         trackingDataCache = await res.json();
         lastCacheUpdate = now;
@@ -153,64 +153,60 @@
     return recipients.filter(email => !existing.includes(email));
   }
 
+  // A hung worker used to swallow the click outright: Send was cancelled and the
+  // replacement click only fired once the fetch settled, which never happened.
+  const NEW_PIXEL_TIMEOUT_MS = 3000;
+
   // Inject tracking pixel into a compose body for given recipients
   async function injectTracker(bodyEl, recipients) {
     if (!serverUrl || recipients.length === 0) return;
 
     const form = findComposeForm(bodyEl);
     const emailContent = getEmailContent(form);
-    let injectedCount = 0;
+    const contentArea = bodyEl.querySelector('[contenteditable="true"]')
+      || bodyEl.querySelector('.Am.Al.editable')
+      || bodyEl;
 
-    for (const recipient of recipients) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (dashboardPassword) headers['Authorization'] = 'Basic ' + btoa(':' + dashboardPassword);
+
+    // In parallel, so one slow recipient does not add its timeout to the rest.
+    const created = await Promise.all(recipients.map(async (recipient) => {
+      const messageId = Date.now() + '-' + Math.random().toString(36).slice(2, 11);
       try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (dashboardPassword) {
-          headers['Authorization'] = 'Basic ' + btoa(':' + dashboardPassword);
-        }
-        
-        const payload = {
-          to: recipient,
-          subject: emailContent.subject,
-          bodyPreview: emailContent.bodyPreview,
-          messageId: Date.now() + '-' + Math.random().toString(36).substr(2, 9) // Unique message ID
-        };
-        
-        const res = await fetch(`${serverUrl}/new`, { 
+        const res = await fetch(`${serverUrl}/new`, {
           method: 'POST',
           headers,
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            to: recipient,
+            subject: emailContent.subject,
+            bodyPreview: emailContent.bodyPreview,
+            messageId,
+          }),
+          signal: AbortSignal.timeout(NEW_PIXEL_TIMEOUT_MS),
         });
-        
         if (!res.ok) {
           console.warn(LOG, 'Failed to create tracker for', recipient, '- status:', res.status);
-          continue;
+          return null;
         }
-        const data = await res.json();
-
-        const img = document.createElement('img');
-        img.src = data.pixel;
-        img.width = 1;
-        img.height = 1;
-        img.style.cssText = 'display:none!important;width:1px!important;height:1px!important;opacity:0!important;position:absolute!important;';
-        img.setAttribute('data-mail-tracker', data.id);
-        img.setAttribute('data-mail-tracker-to', recipient);
-        img.setAttribute('data-message-id', payload.messageId);
-
-        // Try to inject into the actual email content area, not just the compose div
-        const contentArea = bodyEl.querySelector('[contenteditable="true"]') || 
-                           bodyEl.querySelector('.Am.Al.editable') ||
-                           bodyEl;
-        
-        contentArea.appendChild(img);
-        injectedCount++;
-        console.log(LOG, 'Injected tracker into content area for', recipient, '- id:', data.id);
+        return { data: await res.json(), recipient, messageId };
       } catch (e) {
         console.warn(LOG, 'Error creating tracker for', recipient, e.message);
+        return null;
       }
-    }
+    }));
 
-    if (injectedCount > 0) {
-      console.log(LOG, 'Injected', injectedCount, 'tracking pixels');
+    for (const { data, recipient, messageId } of created.filter(Boolean)) {
+      const img = document.createElement('img');
+      img.src = data.pixel;
+      img.width = 1;
+      img.height = 1;
+      img.style.cssText = 'display:none!important;width:1px!important;height:1px!important;opacity:0!important;position:absolute!important;';
+      img.setAttribute('data-mail-tracker', data.id);
+      img.setAttribute('data-mail-tracker-to', recipient);
+      img.setAttribute('data-message-id', messageId);
+      contentArea.appendChild(img);
+      console.log(LOG, 'Injected tracker for', recipient, '- id:', data.id);
     }
   }
 
@@ -331,42 +327,24 @@
         'div[role="button"][data-tooltip*="Send"]'
       );
 
-      if (target) {
-        console.log(LOG, 'Send button clicked - checking for untracked recipients');
-        
-        // Prevent the send
-        e.stopPropagation();
-        e.preventDefault();
-        
-        // Set flag to prevent re-interception
-        isSending = true;
-        
-        // Process all compose windows
-        const bodies = findComposeBodies();
-        for (const body of bodies) {
-          const form = findComposeForm(body);
-          if (!form) continue;
-          
-          const recipients = getRecipients(form);
-          const untracked = getUntrackedRecipients(body, recipients);
-          
-          if (untracked.length > 0) {
-            console.log(LOG, 'Injecting pixels for untracked recipients:', untracked);
-            await processCompose(body);
-            // Wait a bit for pixels to be added to DOM
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        }
-        
-        console.log(LOG, 'All pixels injected, sending email now');
-        
-        // Now trigger the actual send
-        setTimeout(() => {
-          target.click();
-          // Reset flag after send
-          setTimeout(() => { isSending = false; }, 1000);
-        }, 100);
+      if (!target) return;
+
+      console.log(LOG, 'Send button clicked - checking for untracked recipients');
+      e.stopPropagation();
+      e.preventDefault();
+      isSending = true;
+
+      // Whatever happens to the pixels, the mail still has to go out.
+      try {
+        for (const body of findComposeBodies()) await processCompose(body);
+      } catch (err) {
+        console.warn(LOG, 'Pixel injection failed, sending anyway:', err.message);
       }
+
+      setTimeout(() => {
+        target.click();
+        setTimeout(() => { isSending = false; }, 1000);
+      }, 100);
     }, true); // Use capture phase to intercept before Gmail
   }
 

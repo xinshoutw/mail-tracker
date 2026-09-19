@@ -1,6 +1,6 @@
 // Background service worker — polls for new opens and sends notifications
 
-const POLL_INTERVAL = 300_000; // 5 minutes
+const POLL_TIMEOUT_MS = 10_000; // a hung fetch would keep the service worker pinned alive
 
 async function getServerUrl() {
   const { serverUrl, dashboardPassword } = await chrome.storage.sync.get(['serverUrl', 'dashboardPassword']);
@@ -16,7 +16,7 @@ async function pollForOpens() {
     if (password) {
       headers['Authorization'] = 'Basic ' + btoa(':' + password);
     }
-    const res = await fetch(`${serverUrl}/list`, { headers });
+    const res = await fetch(`${serverUrl}/list`, { headers, signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
     if (!res.ok) return;
     const pixels = await res.json();
 
