@@ -142,6 +142,7 @@ wrangler.toml             KV binding 與 cron trigger
 | `GET /t/:id` | 否 | 提供像素並記錄開信 |
 | `GET /s/:id` | 是 | 追蹤詳細頁，或加 `?format=json` 取得 JSON 統計 |
 | `GET /list` | 是 | 以 JSON 列出所有 tracker |
+| `GET /feed` | 是 | 近期開信紀錄，單一 key，供擴充功能背景輪詢 |
 | `POST /self` | 是 | 將近期開信重新歸類為自開信，`{ ids: [...] }`，上限 50 |
 | `DELETE /d/:id` | 是 | 刪除 tracker |
 

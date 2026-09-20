@@ -22,8 +22,8 @@ This project runs on Cloudflare's **free tier**. For most users, you'll never pa
 | **Recipient opens email** | 1 | 1 | 3 (tracker + queue + hint) | 0 |
 | **Self-view detected** | 1 | 1 | 1 | 0 |
 | **Cron, queue empty** (every 1 min) | 1 | 1 (the hint) | 0 | **0** |
-| **Cron, queue non-empty** | 1 | 1 + 2 per queued open | 0 | 1 |
-| **Extension polls /list** (every 5 min) | 1 | 0 | 0 | **1** |
+| **Cron, queue non-empty** | 1 | 2 + 2 per queued open | 1 (the feed) | 1 |
+| **Extension polls /feed** (every 5 min) | 1 | 1 | 0 | **0** |
 | **View tracker stats** | 1 | 1 | 0 | 0 |
 | **Delete tracker** | 1 | 0 | 0 (1 delete) | 0 |
 | **Load web dashboard** | 1 | 0 | 0 | **1** |
@@ -37,11 +37,15 @@ trackers rather than one read per tracker.
 > 1,440 of something per day before anyone sends an email, so what that
 > something *is* decides whether the namespace survives the day.
 >
-> This is why `scheduled()` checks a single `__queued__` hint key with `get()`
-> and only calls `list()` when the hint says the queue is non-empty. Idle cost is
-> 1,440 reads a day — 1.4% of the read budget — instead of 1,440 lists, which is
-> 144% of the list budget. Deleting that check to "simplify" the handler puts the
-> worker back over the daily limit at rest, and takes `/` and `/list` down with
+> Both background jobs are built around that. `scheduled()` checks a single
+> `__queued__` hint with `get()` and only calls `list()` when the queue is
+> actually non-empty, and the extension polls `/feed` — one `__feed__` key the
+> cron maintains — instead of `/list`, which enumerates the namespace. Between
+> them that is 1,440 + 288 reads a day (1.7% of the read budget) where it used to
+> be 1,728 lists a day (173% of the list budget).
+>
+> Collapsing either one back into a `list()` "for simplicity" puts the worker
+> over the daily limit while completely idle, and takes `/` and `/list` down with
 > it until the 00:00 UTC reset, because those list() too.
 
 ### Real-World Cost Estimates
@@ -50,9 +54,9 @@ trackers rather than one read per tracker.
 - Send ~20 tracked emails/day
 - ~50 opens/day
 - Cron trigger: 1,440 requests/day (once per minute, 1 read and 0 lists when idle)
-- Extension polling: 288 requests/day
-- **Total: ~1,800 requests/day, ~1,600 KV reads/day, ~180 KV writes/day, ~290 KV list ops/day**
-- Every budget under a third full, list ops included. **Cost: $0/month**
+- Extension polling: 288 requests/day (1 read each, 0 lists)
+- **Total: ~1,800 requests/day, ~1,900 KV reads/day, ~180 KV writes/day, ~5 KV list ops/day**
+- Lists are now spent only when you actually open the dashboard. **Cost: $0/month**
 
 **Scenario 2: Heavy personal use (free)**
 - Send ~100 tracked emails/day

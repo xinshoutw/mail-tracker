@@ -49,7 +49,8 @@ mail-tracker/
 | `/t/:id` | GET | No | Serve tracking pixel & record open |
 | `/s/:id` | GET | Yes | Tracker detail page (HTML) or stats (JSON with `?format=json`) |
 | `/new` | POST | Yes | Create new pixel from `{ to, subject, bodyPreview, messageId }` |
-| `/list` | GET | Yes | List all pixels as JSON (used by extension) |
+| `/list` | GET | Yes | List all pixels as JSON (used by the dashboard and popup) |
+| `/feed` | GET | Yes | Recent genuine opens from one key (the extension's background poll) |
 | `/self` | POST | Yes | Reclassify recent opens as self-views, `{ ids: [...] }`, max 50 |
 | `/d/:id` | DELETE | Yes | Delete a pixel |
 
@@ -99,7 +100,11 @@ Each pixel in KV (key = 16 hex chars from a UUID; it was 8, which is only
   `put` clears it, so never call `TRACKER.put` on a tracker directly.
 - Worker-owned keys use the `__` prefix (`__pending__:<ms>:<id>` for queued
   webhooks, one key per open with a TTL; `__queued__` as the "queue is not
-  empty" hint). Listings and routes must skip them.
+  empty" hint; `__feed__` for the last 50 genuine opens). Listings and routes
+  must skip them.
+- `__feed__` exists so the extension's background poll is a `get()` of one key
+  instead of a `list()` of the namespace. The cron writes it once per drain,
+  never once per open, because KV allows only one write per second per key.
 
 ## Open Filtering Pipeline
 
@@ -147,7 +152,7 @@ their own thread.
 ### Extension
 - Gmail content script (`gmail.js`) hooks Send button to auto-inject tracking pixels
 - Per-recipient tracking: each recipient gets their own pixel ID
-- Background service worker polls for new opens
+- Background service worker polls `/feed` every 5 minutes for new opens
 
 ## Deployment
 

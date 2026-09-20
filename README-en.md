@@ -145,6 +145,7 @@ password matters, and it may contain colons.
 | `GET /t/:id` | No | Serve the pixel and record the open |
 | `GET /s/:id` | Yes | Tracker page, or stats as JSON with `?format=json` |
 | `GET /list` | Yes | All trackers as JSON |
+| `GET /feed` | Yes | Recent opens from a single key, for the extension's background poll |
 | `POST /self` | Yes | Reclassify recent opens as self-views, `{ ids: [...] }`, max 50 |
 | `DELETE /d/:id` | Yes | Delete a tracker |
 

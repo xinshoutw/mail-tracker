@@ -155,6 +155,11 @@ describe('route auth', () => {
     assert.match(res.headers.get('WWW-Authenticate'), /^Basic/);
   });
 
+  test('the extension feed is not readable without the password', async () => {
+    const res = await worker.fetch(req('/feed', { auth: false }), env);
+    assert.equal(res.status, 401);
+  });
+
   test('an unconfigured worker answers 503, not an open dashboard', async () => {
     const res = await worker.fetch(req('/', { auth: false }), { TRACKER: env.TRACKER });
     assert.equal(res.status, 503);
@@ -378,6 +383,50 @@ describe('scheduled webhooks', () => {
     env.TRACKER.ops.list = 0;
     await worker.scheduled({}, env);
     assert.equal(env.TRACKER.ops.list, 0, 'hint gone, so no further listing');
+  });
+
+  test('publishes drained opens to /feed, without the opener IP', async () => {
+    const id = await createTracker();
+    await openPixel(id);
+    await ageQueue(id, 30_000);
+    await worker.scheduled({}, env);
+
+    const { opens } = await (await worker.fetch(req('/feed'), env)).json();
+    assert.equal(opens.length, 1);
+    assert.equal(opens[0].id, id);
+    assert.equal(opens[0].recipient, 'her@example.com');
+    assert.equal(opens[0].opens, 1);
+    // The feed only drives a desktop notification, which has no use for an IP.
+    assert.ok(!('ip' in opens[0]), 'feed must not carry the opener IP');
+  });
+
+  test('reading the feed costs one get and no list', async () => {
+    env.TRACKER.ops.get = 0;
+    env.TRACKER.ops.list = 0;
+
+    await worker.fetch(req('/feed'), env);
+
+    // The whole point of /feed: the extension polls it every five minutes, and
+    // enumerating the namespace that often is 288 of 1000 daily list operations.
+    assert.equal(env.TRACKER.ops.list, 0, 'polling must not enumerate trackers');
+    assert.equal(env.TRACKER.ops.get, 1);
+  });
+
+  test('caps the feed so it cannot grow without bound', async () => {
+    const stale = Array.from({ length: 50 }, (_, i) => ({
+      id: 'old', time: `2020-01-01T00:00:${String(i).padStart(2, '0')}.000Z`,
+    }));
+    await env.TRACKER.put('__feed__', JSON.stringify(stale));
+
+    const id = await createTracker();
+    await openPixel(id);
+    await ageQueue(id, 30_000);
+    await worker.scheduled({}, env);
+
+    const { opens } = await (await worker.fetch(req('/feed'), env)).json();
+    assert.equal(opens.length, 50, 'still capped');
+    assert.equal(opens.at(-1).id, id, 'newest kept');
+    assert.equal(opens[0].time, '2020-01-01T00:00:01.000Z', 'oldest dropped');
   });
 
   test('sends one webhook per genuine open and clears the queue', async () => {

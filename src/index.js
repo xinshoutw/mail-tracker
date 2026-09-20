@@ -21,6 +21,12 @@ const PENDING_TTL_S = 3600;
 // the daily limit before a single email was tracked, which took / and /list
 // down with it because they list() too.
 const QUEUE_HINT = '__queued__';
+// Recent genuine opens, served by /feed. The extension used to poll /list every
+// five minutes, and /list enumerates the namespace — 288 list operations a day
+// out of 1,000. One key it can get() instead costs a read out of 100,000. The
+// cron writes it once per drain, so an idle mailbox writes nothing at all.
+const FEED_KEY = '__feed__';
+const FEED_LIMIT = 50;
 const WEBHOOK_GRACE_MS = 10_000;
 // ponytail: 10 webhooks a minute is plenty for one mailbox and keeps the cron
 // inside the free plan's 50-subrequest budget. Raise it with the plan if the
@@ -280,6 +286,14 @@ export default {
       });
     }
 
+    // GET /feed — recent opens for the extension's background poll. Deliberately
+    // one get() of one key: see FEED_KEY. The opener's IP is left out, since a
+    // desktop notification has no use for it.
+    if (url.pathname === '/feed') {
+      if (!checkAuth(request, env)) return requireAuth(env, CORS_HEADERS);
+      return json({ opens: (await env.TRACKER.get(FEED_KEY, 'json')) || [] });
+    }
+
     // GET /list — JSON API for extension
     if (url.pathname === '/list') {
       if (!checkAuth(request, env)) return requireAuth(env, CORS_HEADERS);
@@ -345,6 +359,7 @@ export default {
     }
 
     const now = Date.now();
+    const drained = [];
 
     for (const key of keys) {
       const item = await env.TRACKER.get(key.name, 'json');
@@ -364,15 +379,24 @@ export default {
         continue;
       }
 
-      await sendWebhookNotifications(env, {
+      const open = {
+        id: item.id,
         recipient: item.recipient,
         subject: item.subject,
         opens: tracker.opens,
         country: item.country,
-        ip: item.ip,
         time: item.time,
-      });
+      };
+      await sendWebhookNotifications(env, { ...open, ip: item.ip });
+      drained.push(open);
       console.log(`[cron] id=${item.id} webhook sent for genuine open`);
+    }
+
+    // One write per drain, not per open, so a burst cannot trip the 1 write/sec
+    // limit KV enforces on a single key.
+    if (drained.length) {
+      const feed = (await env.TRACKER.get(FEED_KEY, 'json')) || [];
+      await env.TRACKER.put(FEED_KEY, JSON.stringify([...feed, ...drained].slice(-FEED_LIMIT)));
     }
   },
 };
