@@ -16,30 +16,44 @@ This project runs on Cloudflare's **free tier**. For most users, you'll never pa
 
 ### What Our App Uses Per Action
 
-| Action | Worker Requests | KV Reads | KV Writes |
-|--------|:-:|:-:|:-:|
-| **Send email** (create tracker) | 1 | 0 | 1 |
-| **Recipient opens email** | 1 | 1 | 2 (tracker + webhook queue) |
-| **Self-view detected** | 1 | 1 | 1 |
-| **Cron processes webhooks** (every 1 min) | 1 | 1 | 0–1 |
-| **Extension polls /list** (every 60s) | 1 | N (one per tracker) | 0 |
-| **View tracker stats** | 1 | 1 | 0 |
-| **Delete tracker** | 1 | 0 | 0 (1 delete) |
-| **Load web dashboard** | 1 | N (one per tracker) | 0 |
+| Action | Worker Requests | KV Reads | KV Writes | KV Lists |
+|--------|:-:|:-:|:-:|:-:|
+| **Send email** (create tracker) | 1 | 0 | 1 | 0 |
+| **Recipient opens email** | 1 | 1 | 2 (tracker + webhook queue) | 0 |
+| **Self-view detected** | 1 | 1 | 1 | 0 |
+| **Cron drains webhooks** (every 5 min) | 1 | 0–2 per queued open | 0 | **1, always** |
+| **Extension polls /list** (every 5 min) | 1 | 0 | 0 | **1** |
+| **View tracker stats** | 1 | 1 | 0 | 0 |
+| **Delete tracker** | 1 | 0 | 0 (1 delete) | 0 |
+| **Load web dashboard** | 1 | 0 | 0 | **1** |
+
+`/` and `/list` render from `list()` metadata, so they cost one list per 1000
+trackers rather than one read per tracker.
+
+> [!WARNING]
+> **The list budget is the one that bites, and it bites when you are idle.**
+> Reads get 100,000 a day; lists get 1,000. The cron lists the queue on every
+> firing whether or not anything is in it, so the schedule alone sets a floor on
+> daily usage: `* * * * *` is 1,440 list ops a day and blows the limit by
+> mid-afternoon with nobody sending a single email. Worse, `/` and `/list` list()
+> too, so the dashboard goes down with it until the daily reset at 00:00 UTC.
+> `*/5 * * * *` is 288 a day. Do not lower it without redoing this arithmetic.
 
 ### Real-World Cost Estimates
 
 **Scenario 1: Personal use (free)**
 - Send ~20 tracked emails/day
 - ~50 opens/day
-- Cron trigger: ~1,440 requests/day (once per minute, 0 writes when idle)
-- **Total: ~1,510 requests/day, ~120 KV writes/day**
-- Well within free tier. **Cost: $0/month**
+- Cron trigger: 288 requests/day (every 5 minutes, 0 writes when idle)
+- Extension polling: 288 requests/day
+- **Total: ~630 requests/day, ~120 KV writes/day, ~580 KV list ops/day**
+- Within free tier, but list ops sit at ~58% of their limit before you send anything.
+  **Cost: $0/month**
 
 **Scenario 2: Heavy personal use (free)**
 - Send ~100 tracked emails/day
 - ~500 opens/day
-- 200 pixels stored, extension polling reads ~200 keys per poll
+- 200 pixels stored; polling and the dashboard read metadata, not whole records
 - **Total: ~290,000 KV reads/day, ~800 KV writes/day**
 - Still within free tier. **Cost: $0/month**
 

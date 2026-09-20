@@ -40,7 +40,7 @@ noise, and stores everything in your own KV namespace. No third party ever sees 
 4. The open is queued for notification rather than announced immediately.
 5. If you were the one who opened the thread, the extension tells the Worker to reclassify
    it as a self-view within that window.
-6. A cron trigger drains the queue a few seconds later and notifies you about what is left.
+6. A cron trigger drains the queue within a few minutes and notifies you about what is left.
 
 The delay in steps 4 to 6 is the point: it is what stops your own reading of a thread from
 being reported as the recipient opening your mail.
@@ -83,7 +83,7 @@ pnpm run deploy
 >
 > ```toml
 > [triggers]
-> crons = ["* * * * *"]
+> crons = ["*/5 * * * *"]
 > ```
 
 ### Extension

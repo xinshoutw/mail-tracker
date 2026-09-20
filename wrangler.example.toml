@@ -11,8 +11,13 @@ id = "your-kv-namespace-id-here"  # Replace with your actual KV namespace ID
 # Required. The worker drains queued webhooks here, a short delay after each open,
 # so a self-view has time to be reclassified first. Without this trigger the
 # scheduled() handler never runs and Slack/Discord notifications never fire.
+#
+# Do not set this to "* * * * *". scheduled() opens with a list(), whether or not
+# anything is queued, so every minute costs 1440 list operations a day against a
+# 1000/day free-tier budget — the namespace runs out mid-afternoon with no
+# traffic at all, and / and /list start failing too because they list() as well.
 [triggers]
-crons = ["* * * * *"]
+crons = ["*/5 * * * *"]
 
 # DASHBOARD_PASSWORD is required — the worker refuses every route without it,
 # rather than leaving your recipients, subjects and opener IPs open to anyone

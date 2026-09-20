@@ -128,7 +128,7 @@ Get real-time notifications on Slack or Discord when emails are opened:
 
 Notifications need the `[triggers]` cron block from `wrangler.example.toml` in
 your `wrangler.toml`. Without it the scheduled handler never runs and no webhook
-is ever sent. Delivery is within ~1 minute of a genuine open. Self-opens are automatically filtered out — you'll never get notified for opening your own emails.
+is ever sent. Delivery is within ~5 minutes of a genuine open. Self-opens are automatically filtered out — you'll never get notified for opening your own emails.
 
 ---
 

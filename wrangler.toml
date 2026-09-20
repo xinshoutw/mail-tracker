@@ -10,8 +10,13 @@ id = "401b91f449a84845bf61839f20078519"  # namespace title: email-tracker-xinsho
 # Drains queued webhooks a short delay after each open, so a self-view has time
 # to be reclassified first. Without this trigger the scheduled() handler never
 # runs and Slack/Discord notifications never fire.
+#
+# Every minute burned 1440 list() calls a day against a 1000/day free-tier list
+# budget, with no traffic at all — scheduled() lists the queue whether or not
+# anything is in it. That also starved / and /list, which list() too. Five
+# minutes costs 288/day; the webhook just arrives up to 5 minutes after the open.
 [triggers]
-crons = ["* * * * *"]
+crons = ["*/5 * * * *"]
 
 # Secrets are NOT set here. They live in the Cloudflare dashboard under
 # Settings -> Variables and Secrets:
