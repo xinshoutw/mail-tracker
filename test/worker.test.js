@@ -13,23 +13,34 @@ const AUTH = 'Basic ' + Buffer.from(`:${PASSWORD}`).toString('base64');
 const SENDER_IP = '203.0.113.9';
 const OPENER_IP = '198.51.100.4';
 
-/** Minimal in-memory stand-in for the KV binding, including list() metadata. */
+/**
+ * Minimal in-memory stand-in for the KV binding, including list() metadata.
+ * `ops` counts calls by kind: the free plan meters reads and lists on wildly
+ * different budgets (100,000/day vs 1,000/day), so which one a code path spends
+ * is worth asserting on, not just whether it works.
+ */
 function fakeKV() {
   const store = new Map();
+  const ops = { get: 0, put: 0, delete: 0, list: 0 };
   return {
     store,
+    ops,
     async get(name, type) {
+      ops.get++;
       const hit = store.get(name);
       if (!hit) return null;
       return type === 'json' ? JSON.parse(hit.value) : hit.value;
     },
     async put(name, value, opts = {}) {
+      ops.put++;
       store.set(name, { value, metadata: opts.metadata ?? null });
     },
     async delete(name) {
+      ops.delete++;
       store.delete(name);
     },
     async list({ prefix = '', limit = 1000 } = {}) {
+      ops.list++;
       const keys = [...store.entries()]
         .filter(([name]) => name.startsWith(prefix))
         .slice(0, limit)
@@ -340,6 +351,34 @@ describe('scheduled webhooks', () => {
     await env.TRACKER.put(id, JSON.stringify(tracker));
     await env.TRACKER.put(key.name, JSON.stringify({ ...item, time: when }));
   }
+
+  test('an idle firing spends a read, not a list operation', async () => {
+    env.TRACKER.ops.get = 0;
+    env.TRACKER.ops.list = 0;
+
+    await worker.scheduled({}, env);
+
+    // Listing an empty queue on every firing is what put the namespace over the
+    // 1,000/day free-tier list limit with no traffic at all.
+    assert.equal(env.TRACKER.ops.list, 0, 'empty queue must not cost a list');
+    assert.equal(env.TRACKER.ops.get, 1, 'one hint read and nothing else');
+    assert.equal(sent.length, 0);
+  });
+
+  test('clears the queue hint once drained, so later firings stop listing', async () => {
+    const id = await createTracker();
+    await openPixel(id);
+    await ageQueue(id, 30_000);
+
+    await worker.scheduled({}, env);
+    assert.equal(sent.length, 1, 'drains the queued open');
+
+    await worker.scheduled({}, env); // hint still set, queue now empty: clears it
+
+    env.TRACKER.ops.list = 0;
+    await worker.scheduled({}, env);
+    assert.equal(env.TRACKER.ops.list, 0, 'hint gone, so no further listing');
+  });
 
   test('sends one webhook per genuine open and clears the queue', async () => {
     const id = await createTracker();

@@ -14,6 +14,13 @@ const ID_LENGTH = 16;
 const INTERNAL_PREFIX = '__';
 const PENDING_PREFIX = '__pending__:';
 const PENDING_TTL_S = 3600;
+// Set whenever an open is queued, so scheduled() can rule out an empty queue
+// with a get() instead of a list(). The free plan allows 100,000 reads a day
+// but only 1,000 lists, and the cron fires on schedule whether or not anyone
+// sent an email — listing unconditionally cost 1,440 lists a day at rest, over
+// the daily limit before a single email was tracked, which took / and /list
+// down with it because they list() too.
+const QUEUE_HINT = '__queued__';
 const WEBHOOK_GRACE_MS = 10_000;
 // ponytail: 10 webhooks a minute is plenty for one mailbox and keeps the cron
 // inside the free plan's 50-subrequest budget. Raise it with the plan if the
@@ -198,11 +205,17 @@ export default {
       // read-modify-write per open: KV caps writes at one per second per key, and
       // concurrent opens silently overwrote each other's entries. The TTL keeps an
       // abandoned queue from growing without bound if the cron trigger is missing.
-      await env.TRACKER.put(
-        `${PENDING_PREFIX}${nowMs}:${id}`,
-        JSON.stringify({ id, time: now, ip, country, recipient: existing.recipient, subject: existing.subject }),
-        { expirationTtl: PENDING_TTL_S },
-      );
+      await Promise.all([
+        env.TRACKER.put(
+          `${PENDING_PREFIX}${nowMs}:${id}`,
+          JSON.stringify({ id, time: now, ip, country, recipient: existing.recipient, subject: existing.subject }),
+          { expirationTtl: PENDING_TTL_S },
+        ),
+        // KV reads are eventually consistent, so the cron may not see this for a
+        // firing or two. The entry stays queued until it does, so the webhook is
+        // delayed, never dropped. The TTL matches the entries it stands for.
+        env.TRACKER.put(QUEUE_HINT, '1', { expirationTtl: PENDING_TTL_S }),
+      ]);
 
       return servePixel();
     }
@@ -321,7 +334,16 @@ export default {
   },
 
   async scheduled(event, env) {
+    // Nearly every firing finds an empty queue. Spend a read to establish that,
+    // not a list — see QUEUE_HINT.
+    if (!(await env.TRACKER.get(QUEUE_HINT))) return;
+
     const { keys } = await env.TRACKER.list({ prefix: PENDING_PREFIX, limit: MAX_PENDING_PER_RUN });
+    if (!keys.length) {
+      await env.TRACKER.delete(QUEUE_HINT);
+      return;
+    }
+
     const now = Date.now();
 
     for (const key of keys) {

@@ -12,12 +12,12 @@ id = "your-kv-namespace-id-here"  # Replace with your actual KV namespace ID
 # so a self-view has time to be reclassified first. Without this trigger the
 # scheduled() handler never runs and Slack/Discord notifications never fire.
 #
-# Do not set this to "* * * * *". scheduled() opens with a list(), whether or not
-# anything is queued, so every minute costs 1440 list operations a day against a
-# 1000/day free-tier budget — the namespace runs out mid-afternoon with no
-# traffic at all, and / and /list start failing too because they list() as well.
+# Every minute is affordable again now that an idle firing costs one KV read
+# instead of one list: the free plan allows 100,000 reads a day and only 1,000
+# lists. That only holds while scheduled() keeps its QUEUE_HINT check — drop it
+# and this schedule is 1,440 lists a day, over the daily limit at rest.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 # DASHBOARD_PASSWORD is required — the worker refuses every route without it,
 # rather than leaving your recipients, subjects and opener IPs open to anyone

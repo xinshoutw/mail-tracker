@@ -19,9 +19,10 @@ This project runs on Cloudflare's **free tier**. For most users, you'll never pa
 | Action | Worker Requests | KV Reads | KV Writes | KV Lists |
 |--------|:-:|:-:|:-:|:-:|
 | **Send email** (create tracker) | 1 | 0 | 1 | 0 |
-| **Recipient opens email** | 1 | 1 | 2 (tracker + webhook queue) | 0 |
+| **Recipient opens email** | 1 | 1 | 3 (tracker + queue + hint) | 0 |
 | **Self-view detected** | 1 | 1 | 1 | 0 |
-| **Cron drains webhooks** (every 5 min) | 1 | 0–2 per queued open | 0 | **1, always** |
+| **Cron, queue empty** (every 1 min) | 1 | 1 (the hint) | 0 | **0** |
+| **Cron, queue non-empty** | 1 | 1 + 2 per queued open | 0 | 1 |
 | **Extension polls /list** (every 5 min) | 1 | 0 | 0 | **1** |
 | **View tracker stats** | 1 | 1 | 0 | 0 |
 | **Delete tracker** | 1 | 0 | 0 (1 delete) | 0 |
@@ -32,23 +33,26 @@ trackers rather than one read per tracker.
 
 > [!WARNING]
 > **The list budget is the one that bites, and it bites when you are idle.**
-> Reads get 100,000 a day; lists get 1,000. The cron lists the queue on every
-> firing whether or not anything is in it, so the schedule alone sets a floor on
-> daily usage: `* * * * *` is 1,440 list ops a day and blows the limit by
-> mid-afternoon with nobody sending a single email. Worse, `/` and `/list` list()
-> too, so the dashboard goes down with it until the daily reset at 00:00 UTC.
-> `*/5 * * * *` is 288 a day. Do not lower it without redoing this arithmetic.
+> Reads get 100,000 a day; lists get only 1,000. A cron firing every minute is
+> 1,440 of something per day before anyone sends an email, so what that
+> something *is* decides whether the namespace survives the day.
+>
+> This is why `scheduled()` checks a single `__queued__` hint key with `get()`
+> and only calls `list()` when the hint says the queue is non-empty. Idle cost is
+> 1,440 reads a day — 1.4% of the read budget — instead of 1,440 lists, which is
+> 144% of the list budget. Deleting that check to "simplify" the handler puts the
+> worker back over the daily limit at rest, and takes `/` and `/list` down with
+> it until the 00:00 UTC reset, because those list() too.
 
 ### Real-World Cost Estimates
 
 **Scenario 1: Personal use (free)**
 - Send ~20 tracked emails/day
 - ~50 opens/day
-- Cron trigger: 288 requests/day (every 5 minutes, 0 writes when idle)
+- Cron trigger: 1,440 requests/day (once per minute, 1 read and 0 lists when idle)
 - Extension polling: 288 requests/day
-- **Total: ~630 requests/day, ~120 KV writes/day, ~580 KV list ops/day**
-- Within free tier, but list ops sit at ~58% of their limit before you send anything.
-  **Cost: $0/month**
+- **Total: ~1,800 requests/day, ~1,600 KV reads/day, ~180 KV writes/day, ~290 KV list ops/day**
+- Every budget under a third full, list ops included. **Cost: $0/month**
 
 **Scenario 2: Heavy personal use (free)**
 - Send ~100 tracked emails/day

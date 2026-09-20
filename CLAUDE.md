@@ -63,6 +63,13 @@ a 503** — the worker never runs unprotected.
 The `scheduled()` handler drains queued webhooks and needs the `[triggers]` cron
 block in `wrangler.toml`. Without it, no notification is ever sent.
 
+It fires 1,440 times a day, so it rules out an empty queue by reading the
+`__queued__` hint and only calls `list()` when something is actually queued. The
+free plan meters 100,000 reads a day against only 1,000 lists: listing on every
+firing was 1,440 lists a day at rest, over the daily limit before a single email
+was tracked, and it took `/` and `/list` down with it because those list() too.
+**Do not remove the hint check to simplify the handler.**
+
 ## Storage Schema
 
 Each pixel in KV (key = 16 hex chars from a UUID; it was 8, which is only
@@ -91,7 +98,8 @@ Each pixel in KV (key = 16 hex chars from a UUID; it was 8, which is only
   key blew the Workers subrequest limit at ~50 trackers. Omitting metadata on a
   `put` clears it, so never call `TRACKER.put` on a tracker directly.
 - Worker-owned keys use the `__` prefix (`__pending__:<ms>:<id>` for queued
-  webhooks, one key per open with a TTL). Listings and routes must skip them.
+  webhooks, one key per open with a TTL; `__queued__` as the "queue is not
+  empty" hint). Listings and routes must skip them.
 
 ## Open Filtering Pipeline
 

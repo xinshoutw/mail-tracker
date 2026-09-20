@@ -11,12 +11,12 @@ id = "401b91f449a84845bf61839f20078519"  # namespace title: email-tracker-xinsho
 # to be reclassified first. Without this trigger the scheduled() handler never
 # runs and Slack/Discord notifications never fire.
 #
-# Every minute burned 1440 list() calls a day against a 1000/day free-tier list
-# budget, with no traffic at all — scheduled() lists the queue whether or not
-# anything is in it. That also starved / and /list, which list() too. Five
-# minutes costs 288/day; the webhook just arrives up to 5 minutes after the open.
+# Every minute is affordable again now that an idle firing costs one KV read
+# instead of one list: the free plan allows 100,000 reads a day and only 1,000
+# lists. That only holds while scheduled() keeps its QUEUE_HINT check — drop it
+# and this schedule is 1,440 lists a day, over the daily limit at rest.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 # Secrets are NOT set here. They live in the Cloudflare dashboard under
 # Settings -> Variables and Secrets:
